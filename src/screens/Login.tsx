@@ -36,6 +36,24 @@ export default function Login() {
     }
   }
 
+  async function emailLink() {
+    setErr(''); setMsg('');
+    if (!/\S+@\S+\.\S+/.test(email.trim())) { setErr('Enter your email above first, then tap this.'); return; }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { shouldCreateUser: false, emailRedirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      setMsg('Check your email — tap the sign-in link we just sent. No password needed.');
+    } catch (e: any) {
+      setErr(e.message || 'Could not send the link.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '13px 14px', fontSize: 15, background: '#fff', outline: 'none', marginBottom: 11, fontFamily: 'inherit' };
 
   return (
@@ -62,6 +80,15 @@ export default function Login() {
           <Button disabled={busy || !email || !pw} onClick={submit}>
             {busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : 'Create account'}
           </Button>
+
+          {mode === 'in' && (
+            <button
+              onClick={emailLink}
+              disabled={busy}
+              style={{ width: '100%', background: C.goldTint, border: 'none', borderRadius: 14, padding: '12px', color: C.navy, fontSize: 13, fontWeight: 700, marginTop: 12 }}>
+              Forgot password? Email me a sign-in link
+            </button>
+          )}
 
           <button
             onClick={() => { setMode(mode === 'in' ? 'up' : 'in'); setErr(''); setMsg(''); }}
