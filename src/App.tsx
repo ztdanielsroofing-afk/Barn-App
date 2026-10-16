@@ -11,6 +11,7 @@ import Horses from './screens/Horses';
 import Billing from './screens/Billing';
 import More from './screens/More';
 import CompleteProfile from './screens/CompleteProfile';
+import SignDocuments from './screens/SignDocuments';
 
 export type Nav = { go: (tab: string, section?: string, params?: any) => void };
 
@@ -20,6 +21,8 @@ export default function App() {
   const [section, setSection] = useState<string | null>(null);
   const [params, setParams] = useState<any>(null);
   const [onboardNeeded, setOnboardNeeded] = useState<boolean | null>(null);
+  const [needsSigning, setNeedsSigning] = useState<boolean | null>(null);
+  const [signCheck, setSignCheck] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -37,6 +40,26 @@ export default function App() {
     })();
     return () => { active = false; };
   }, [actualRole, user?.family_id]);
+
+  // Once a client's profile is complete, check for required documents they
+  // still need to sign.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (actualRole === 'client' && user?.family_id && onboardNeeded === false) {
+        const [{ data: docs }, { data: sigs }] = await Promise.all([
+          supabase.from('barn_documents').select('id').eq('active', true).eq('required', true),
+          supabase.from('signatures').select('document_id').eq('family_id', user.family_id),
+        ]);
+        const signed = new Set((sigs || []).map((s: any) => s.document_id));
+        const unsigned = (docs || []).filter((d: any) => !signed.has(d.id));
+        if (active) setNeedsSigning(unsigned.length > 0);
+      } else if (active) {
+        setNeedsSigning(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [actualRole, user?.family_id, onboardNeeded, signCheck]);
 
   if (!isConfigured) return <Setup />;
 
@@ -70,6 +93,11 @@ export default function App() {
   // (Fires whether or not a family is linked — the form creates/attaches it.)
   if (actualRole === 'client' && onboardNeeded === true) {
     return <CompleteProfile onDone={async () => { await refresh(); setOnboardNeeded(false); }} />;
+  }
+
+  // Client still has required documents to sign.
+  if (actualRole === 'client' && onboardNeeded === false && needsSigning === true) {
+    return <SignDocuments onComplete={() => { setNeedsSigning(false); setSignCheck(c => c + 1); }} />;
   }
 
   const nav: Nav = {

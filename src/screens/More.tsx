@@ -5,7 +5,7 @@ import { supabase } from '../supabase';
 import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { Nav } from '../App';
-import { Family, Invoice, Rider, AppUser, TaskRow, Show, Listing, DocRow } from '../types';
+import { Family, Invoice, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature } from '../types';
 import { FamilyBill } from './Billing';
 import AdminOverview from './AdminOverview';
 import { sendInvite } from '../invites';
@@ -117,7 +117,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 8
+        Signed in as {user?.email} · {role} · build 9
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -682,33 +682,119 @@ function Pay() {
   );
 }
 
-/* ---------------- Documents ---------------- */
+/* ---------------- Documents & Contracts (e-sign) ---------------- */
 function Documents() {
-  const { isStaff, user } = useApp();
-  const { data: docs, reload } = useTable<DocRow>('documents', q => q.order('created_at'));
-  const mine = isStaff ? docs : docs.filter(d => !d.family_id || d.family_id === user?.family_id);
-  async function addDoc() {
-    const title = prompt('Document title? (e.g. "2026 Liability Waiver")'); if (!title) return;
-    await supabase.from('documents').insert({ barn_id: user?.barn_id, title, kind: 'waiver', status: 'unsigned' });
-    reload();
+  const { isStaff, user, barn } = useApp();
+  const { data: docs, reload } = useTable<BarnDocument>('barn_documents', q => q.order('created_at'));
+  const { data: sigs } = useTable<Signature>('signatures');
+  const { data: families } = useTable<Family>('families');
+  const [open, setOpen] = useState<BarnDocument | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const sigsFor = (docId: string) => sigs.filter(s => s.document_id === docId);
+  const famName = (id: string | null) => families.find(f => f.id === id)?.family_name || 'Family';
+
+  if (open && isStaff) {
+    const list = sigsFor(open.id);
+    return (
+      <>
+        <button onClick={() => setOpen(null)} style={backBtn}>‹ Documents</button>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy }}>{open.title}</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 12 }}>{open.required ? 'Required' : 'Optional'} · {open.active ? 'Active' : 'Hidden'}</div>
+        {open.body && <Card style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: C.text, lineHeight: 1.6, marginBottom: 12 }}>{open.body}</Card>}
+        <SectionLabel>Signatures ({list.length})</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {list.map(s => (
+            <Card key={s.id}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{famName(s.family_id)}</div>
+                <div style={{ fontSize: 10.5, color: C.muted2 }}>{new Date(s.signed_at).toLocaleDateString()}</div>
+              </div>
+              {s.method === 'drawn' && s.signature_data
+                ? <img src={s.signature_data} alt="signature" style={{ height: 48, marginTop: 6 }} />
+                : <div style={{ fontFamily: serif, fontSize: 20, color: C.navy, marginTop: 4 }}>{s.signer_name || s.signature_data}</div>}
+            </Card>
+          ))}
+          {list.length === 0 && <Empty>No one has signed this yet.</Empty>}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 16 }}>
+          <Button kind="ghost" onClick={async () => { await supabase.from('barn_documents').update({ required: !open.required }).eq('id', open.id); setOpen(null); reload(); }}>
+            {open.required ? 'Make optional' : 'Make required'}
+          </Button>
+          <Button kind="ghost" onClick={async () => { await supabase.from('barn_documents').update({ active: !open.active }).eq('id', open.id); setOpen(null); reload(); }}>
+            {open.active ? 'Hide from families' : 'Show to families'}
+          </Button>
+          <Button kind="ghost" style={{ color: C.red }} onClick={async () => { if (confirm(`Delete "${open.title}" and its signatures?`)) { await supabase.from('barn_documents').delete().eq('id', open.id); setOpen(null); reload(); } }}>
+            Delete document
+          </Button>
+        </div>
+      </>
+    );
   }
+
+  const visible = isStaff ? docs : docs.filter(d => d.active);
+  const mySignedIds = new Set(sigs.filter(s => s.family_id === user?.family_id).map(s => s.document_id));
+
   return (
     <>
       <H>Documents &amp; Contracts</H>
+      {isStaff && (
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 10, lineHeight: 1.5 }}>
+          Documents you add here are shown to families to sign. Mark one <b>required</b> and a family must sign it before they can use the app.
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-        {mine.map(d => (
-          <Card key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
+        {visible.map(d => (
+          <Card key={d.id} onClick={() => isStaff && setOpen(d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{d.title}</div>
-              <div style={{ fontSize: 11, color: C.muted2 }}>{d.kind || 'document'}</div>
+              <div style={{ fontSize: 11, color: C.muted2 }}>
+                {isStaff
+                  ? `${d.required ? 'Required' : 'Optional'} · ${sigsFor(d.id).length} signed${d.active ? '' : ' · hidden'}`
+                  : (d.required ? 'Required' : 'Optional')}
+              </div>
             </div>
-            <Pill color={d.status === 'signed' ? C.green : C.gold}>{d.status}</Pill>
+            {isStaff
+              ? <Icon d={ICONS.chevron} size={17} stroke={C.faint} />
+              : <Pill color={mySignedIds.has(d.id) ? C.green : C.gold}>{mySignedIds.has(d.id) ? 'signed' : 'unsigned'}</Pill>}
           </Card>
         ))}
-        {mine.length === 0 && <Empty>No documents yet.</Empty>}
+        {visible.length === 0 && <Empty>{isStaff ? 'No documents yet. Add your first waiver or contract below.' : 'No documents to sign.'}</Empty>}
       </div>
-      {isStaff && <div style={{ marginTop: 14 }}><Button kind="soft" onClick={addDoc}>+ Add a document</Button></div>}
+      {isStaff && <div style={{ marginTop: 14 }}><Button kind="soft" onClick={() => setAdding(true)}>+ Add a document</Button></div>}
+      {adding && <AddDocModal barnId={barn?.id} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} />}
     </>
+  );
+}
+
+function AddDocModal({ barnId, onClose, onSaved }: { barnId?: string; onClose: () => void; onSaved: () => void }) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [required, setRequired] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', marginBottom: 10, fontFamily: 'inherit' };
+
+  async function save() {
+    if (!title.trim()) return;
+    setBusy(true);
+    await supabase.from('barn_documents').insert({ barn_id: barnId, title: title.trim(), body: body.trim(), required, active: true });
+    setBusy(false); onSaved();
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 12 }}>Add a document</div>
+        <input style={inp} placeholder='Title (e.g. "Liability Waiver 2026")' value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+        <textarea style={{ ...inp, minHeight: 180 }} placeholder="Paste the full document / waiver text here. Families will read this and sign it." value={body} onChange={e => setBody(e.target.value)} />
+        <label style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '4px 2px 14px', cursor: 'pointer' }}>
+          <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} style={{ width: 20, height: 20 }} />
+          <span style={{ fontSize: 13, color: C.text }}>Required — families must sign before using the app</span>
+        </label>
+        <Button disabled={!title.trim() || busy} onClick={save}>{busy ? 'Saving…' : 'Save document'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 

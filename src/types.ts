@@ -164,6 +164,27 @@ export interface Show {
   created_at?: string;
 }
 
+export interface BarnDocument {
+  id: string;
+  barn_id: string;
+  title: string;
+  body: string | null;
+  required: boolean;
+  active: boolean;
+  created_at?: string;
+}
+
+export interface Signature {
+  id: string;
+  barn_id: string;
+  document_id: string;
+  family_id: string | null;
+  signer_name: string | null;
+  method: string | null;
+  signature_data: string | null;
+  signed_at: string;
+}
+
 export interface Listing {
   id: string;
   barn_id: string;
