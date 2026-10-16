@@ -1,0 +1,15 @@
+node_modules
+dist
+*.local
+.DS_Store
+free-rein-build.zip
+free-rein-site.zip
+free-rein-source.zip
+free-rein-test-build.zip
+supabase-setup.html
+import-horses.sql
+make-me-owner.sql
+set-owner-reddog.sql
+fix-invites.sql
+reset-test-client.sql
+*.tsbuildinfo
