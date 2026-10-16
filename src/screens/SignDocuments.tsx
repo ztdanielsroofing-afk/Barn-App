@@ -11,17 +11,27 @@ import { BarnDocument, Signature } from '../types';
 // required ones are signed (typed or drawn).
 export default function SignDocuments({ onComplete }: { onComplete: () => void }) {
   const { user, barn, signOut } = useApp();
-  const { data: docs } = useTable<BarnDocument>('barn_documents', q => q.eq('active', true).order('created_at'));
-  const { data: sigs, reload } = useTable<Signature>('signatures', q => q.eq('family_id', user?.family_id));
+  const { data: docs, loading: loadingDocs } = useTable<BarnDocument>('barn_documents', q => q.eq('active', true).order('created_at'));
+  const { data: sigs, loading: loadingSigs, reload } = useTable<Signature>('signatures', q => q.eq('family_id', user?.family_id));
 
+  const ready = !loadingDocs && !loadingSigs;
   const signedIds = new Set(sigs.map(s => s.document_id));
   const requiredUnsigned = docs.filter(d => d.required && !signedIds.has(d.id));
 
-  // When nothing required is left unsigned, we're done.
+  // Only decide we're done once the data has actually loaded — otherwise the
+  // initial empty state would call onComplete and cause a mount/unmount loop.
   useEffect(() => {
-    if (docs.length >= 0 && requiredUnsigned.length === 0) onComplete();
+    if (ready && requiredUnsigned.length === 0) onComplete();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requiredUnsigned.length]);
+  }, [ready, requiredUnsigned.length]);
+
+  if (!ready) {
+    return (
+      <div className="phone" style={{ alignItems: 'center', justifyContent: 'center', background: C.page }}>
+        <div style={{ color: C.navy, fontFamily: serif, fontSize: 20 }}>Loading…</div>
+      </div>
+    );
+  }
 
   const doc = requiredUnsigned[0];
   if (!doc) {
