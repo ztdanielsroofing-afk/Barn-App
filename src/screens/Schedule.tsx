@@ -6,6 +6,7 @@ import { useTable } from '../db';
 import { supabase } from '../supabase';
 import { Lesson, Horse, Rider, AppUser, ArenaBooking } from '../types';
 import { useApp } from '../AppContext';
+import { notify } from '../notify';
 import { Nav } from '../App';
 
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -254,6 +255,7 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
   }
   async function saveNotes() {
     await supabase.from('lessons').update({ notes, status: 'completed' }).eq('id', lesson.id);
+    await autoChargeLesson(lesson);
     setSaved(true);
   }
   async function del() {
@@ -305,6 +307,21 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
   );
 }
 
+// When a lesson is completed, auto-post its fee to per-lesson families (once).
+async function autoChargeLesson(lesson: Lesson) {
+  if (!lesson.family_id || !lesson.fee || Number(lesson.fee) <= 0) return;
+  const { data: fam } = await supabase.from('families').select('billing_mode, barn_id').eq('id', lesson.family_id).maybeSingle();
+  if ((fam as any)?.billing_mode !== 'per_lesson') return;
+  const { data: existing } = await supabase.from('charges').select('id').eq('lesson_id', lesson.id).limit(1);
+  if (existing && existing.length) return;
+  await supabase.from('charges').insert({
+    barn_id: (fam as any).barn_id, family_id: lesson.family_id, lesson_id: lesson.id, amount: Number(lesson.fee),
+    label: `Lesson — ${new Date(lesson.starts_at).toLocaleDateString()}${lesson.rider_name ? ` (${lesson.rider_name})` : ''}`,
+  });
+  await notify({ barn_id: (fam as any).barn_id, family_id: lesson.family_id, kind: 'billing',
+    title: 'Lesson charged', body: `${new Date(lesson.starts_at).toLocaleDateString()} · $${Number(lesson.fee)}` });
+}
+
 const KINDS = ['Reschedule', 'New booking', 'Cancel', 'Free ride'] as const;
 const fmtLesson = (l: Lesson) => {
   const d = new Date(l.starts_at);
@@ -337,6 +354,8 @@ function RequestSheet({ onClose }: { onClose: () => void }) {
       rider_name: rider || (chosen?.rider_name ?? ''),
       kind, orig, reason, status: 'needs-times', proposed,
     });
+    await notify({ barn_id: barn?.id, audience: 'staff', kind: 'request', link: 'requests',
+      title: `New ${kind.toLowerCase()} request`, body: `${rider || chosen?.rider_name || 'A client'}${orig ? ` · ${orig}` : ''}` });
     setSent(true);
   }
 
@@ -443,9 +462,22 @@ function ArenaDay({ date }: { date: Date }) {
       barn_id: barn?.id, family_id: user?.family_id || null, rider_name: user?.full_name || null,
       date: dk, start_label: slot, status: isStaff ? 'approved' : 'requested',
     });
+    if (!isStaff) {
+      await notify({ barn_id: barn?.id, audience: 'staff', kind: 'request', link: 'requests',
+        title: 'New arena time request', body: `${user?.full_name || 'A client'} · ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${slot}` });
+    }
     refreshAll();
   }
-  async function setStatus(id: string, status: string) { await supabase.from('arena_bookings').update({ status }).eq('id', id); refreshAll(); }
+  async function setStatus(id: string, status: string) {
+    await supabase.from('arena_bookings').update({ status }).eq('id', id);
+    const b = [...bookings, ...pending].find(x => x.id === id);
+    if (b && b.family_id && status !== 'requested') {
+      await notify({ barn_id: barn?.id, family_id: b.family_id, kind: 'approval', link: 'requests',
+        title: `Arena time ${status === 'approved' ? 'approved' : 'declined'}`,
+        body: `${new Date(b.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${b.start_label}` });
+    }
+    refreshAll();
+  }
   async function remove(id: string) { await supabase.from('arena_bookings').delete().eq('id', id); refreshAll(); }
 
   const COLORS: Record<string, { c: string; label: string }> = {

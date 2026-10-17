@@ -6,6 +6,7 @@ import { useTable } from '../db';
 import { supabase } from '../supabase';
 import { Family, Charge, Payment, Lesson } from '../types';
 import { useApp } from '../AppContext';
+import { notify } from '../notify';
 import { Nav } from '../App';
 
 function balanceOf(familyId: string, charges: Charge[], payments: Payment[]) {
@@ -50,12 +51,14 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
       const posts: { label: string; amount: number }[] = [];
       if (Number(f.monthly_fee) > 0) posts.push({ label: `Monthly fee — ${monthLabel}`, amount: Number(f.monthly_fee) });
       if (Number(f.board_fee) > 0) posts.push({ label: `Board — ${monthLabel}`, amount: Number(f.board_fee) });
+      let any = false;
       for (const p of posts) {
         if (!charges.some(c => c.family_id === f.id && c.label === p.label)) {
           await supabase.from('charges').insert({ barn_id: f.barn_id, family_id: f.id, label: p.label, amount: p.amount });
-          added++;
+          added++; any = true;
         }
       }
+      if (any) await notify({ barn_id: f.barn_id, family_id: f.id, kind: 'billing', title: 'New charges posted', body: 'Open My Bill to see your balance and pay.' });
     }
     // per-lesson families: bill any priced lesson not yet charged
     for (const l of lessons) {

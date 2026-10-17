@@ -5,14 +5,17 @@ import { supabase } from '../supabase';
 import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { Nav } from '../App';
-import { Family, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature, Charge, Payment, Lesson } from '../types';
+import { Family, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature, Charge, Payment, Lesson, AppNotification } from '../types';
 import { FamilyBill } from './Billing';
 import AdminOverview from './AdminOverview';
 import { sendInvite } from '../invites';
+import { notify } from '../notify';
 import { Role } from '../types';
 
 export default function More({ nav, section }: { nav: Nav; section: string | null; params?: any }) {
   const { role, isClient, canViewBilling, isStaff, actualRole, previewRole, setPreviewRole } = useApp();
+  const { data: notifs } = useTable<AppNotification>('notifications');
+  const unread = notifs.filter(n => !n.read).length;
 
   if (section) {
     const map: Record<string, JSX.Element> = {
@@ -89,7 +92,12 @@ export default function More({ nav, section }: { nav: Nav; section: string | nul
                 borderBottom: i < arr.length - 1 ? `1px solid rgba(40,58,109,0.06)` : 'none',
               }}>
                 <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{it.l}</span>
-                <Icon d={ICONS.chevron} size={17} stroke={C.faint} />
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {it.s === 'notifications' && unread > 0 && (
+                    <span style={{ background: C.red, color: '#fff', fontSize: 10.5, fontWeight: 800, borderRadius: 20, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{unread}</span>
+                  )}
+                  <Icon d={ICONS.chevron} size={17} stroke={C.faint} />
+                </span>
               </button>
             ))}
           </Card>
@@ -117,7 +125,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 14
+        Signed in as {user?.email} · {role} · build 15
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -448,7 +456,11 @@ function Requests() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {(r.proposed || []).map((p: string, i: number) => <Pill key={i} color={C.navy} bg={C.infoBg}>{p}</Pill>)}
             </div>
-            {r.status !== 'approved' && <Button kind="soft" style={{ marginTop: 11 }} onClick={async () => { await supabase.from('schedule_requests').update({ status: 'approved' }).eq('id', r.id); reload(); }}>Approve &amp; confirm</Button>}
+            {r.status !== 'approved' && <Button kind="soft" style={{ marginTop: 11 }} onClick={async () => {
+              await supabase.from('schedule_requests').update({ status: 'approved' }).eq('id', r.id);
+              if (r.family_id) await notify({ barn_id: r.barn_id, family_id: r.family_id, kind: 'approval', title: 'Schedule request approved', body: `${r.kind}${r.orig ? ` · ${r.orig}` : ''}` });
+              reload();
+            }}>Approve &amp; confirm</Button>}
           </Card>
         ))}
         {reqs.length === 0 && <Empty>No pending requests.</Empty>}
@@ -939,16 +951,33 @@ function ClientDocView({ doc, sig, onBack }: { doc: BarnDocument; sig?: Signatur
 }
 
 /* ---------------- Notifications ---------------- */
+const notifColor = (k?: string | null) => ({ request: C.gold, approval: C.green, billing: C.red, lesson: C.navy } as any)[k || ''] || C.info;
+
 function Notifications() {
-  const { data: notes } = useTable<any>('notifications', q => q.order('created_at'));
+  const { data: notes, reload } = useTable<AppNotification>('notifications', q => q.order('created_at', { ascending: false }));
+  const unread = notes.filter(n => !n.read);
+
+  async function markAll() {
+    if (!unread.length) return;
+    await supabase.from('notifications').update({ read: true }).in('id', unread.map(n => n.id));
+    reload();
+  }
+
   return (
     <>
-      <H>Notifications</H>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-        {notes.map((n: any) => (
-          <Card key={n.id}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{n.title || n.body}</div>
-            {n.body && n.title && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{n.body}</div>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <H>Notifications</H>
+        {unread.length > 0 && <button onClick={markAll} style={chip}>Mark all read</button>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {notes.map(n => (
+          <Card key={n.id} style={{ display: 'flex', gap: 11, alignItems: 'flex-start', opacity: n.read ? 0.6 : 1 }}>
+            <div style={{ width: 9, height: 9, borderRadius: 5, marginTop: 5, flex: 'none', background: n.read ? C.faint : notifColor(n.kind) }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{n.title}</div>
+              {n.body && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{n.body}</div>}
+              <div style={{ fontSize: 10.5, color: C.muted2, marginTop: 3 }}>{new Date(n.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
+            </div>
           </Card>
         ))}
         {notes.length === 0 && <Empty>You’re all caught up.</Empty>}

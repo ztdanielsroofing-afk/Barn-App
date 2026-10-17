@@ -220,6 +220,19 @@ export interface Signature {
   signed_at: string;
 }
 
+export interface AppNotification {
+  id: string;
+  barn_id: string;
+  audience: string | null;
+  family_id: string | null;
+  title: string;
+  body: string | null;
+  kind: string | null;
+  link: string | null;
+  read: boolean;
+  created_at: string;
+}
+
 export interface Listing {
   id: string;
   barn_id: string;
