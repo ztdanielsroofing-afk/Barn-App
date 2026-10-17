@@ -47,10 +47,12 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
     const monthLabel = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     let added = 0;
     for (const f of families) {
-      if (f.billing_mode === 'monthly' && Number(f.monthly_fee) > 0) {
-        const label = `Monthly fee — ${monthLabel}`;
-        if (!charges.some(c => c.family_id === f.id && c.label === label)) {
-          await supabase.from('charges').insert({ barn_id: f.barn_id, family_id: f.id, label, amount: Number(f.monthly_fee) });
+      const posts: { label: string; amount: number }[] = [];
+      if (Number(f.monthly_fee) > 0) posts.push({ label: `Monthly fee — ${monthLabel}`, amount: Number(f.monthly_fee) });
+      if (Number(f.board_fee) > 0) posts.push({ label: `Board — ${monthLabel}`, amount: Number(f.board_fee) });
+      for (const p of posts) {
+        if (!charges.some(c => c.family_id === f.id && c.label === p.label)) {
+          await supabase.from('charges').insert({ barn_id: f.barn_id, family_id: f.id, label: p.label, amount: p.amount });
           added++;
         }
       }
@@ -96,12 +98,16 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {families.map(f => {
           const bal = balanceOf(f.id, charges, payments);
+          const bits: string[] = [];
+          if (Number(f.monthly_fee) > 0) bits.push(`${money(f.monthly_fee)}/mo`);
+          if (Number(f.board_fee) > 0) bits.push(`board ${money(f.board_fee)}`);
+          if (f.billing_mode === 'per_lesson') bits.push('per-lesson');
           return (
             <Card key={f.id} onClick={() => setOpen(f)} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <Avatar init={f.family_name.slice(0, 1)} tint={C.navy} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{f.family_name}</div>
-                <div style={{ fontSize: 11, color: C.muted2, textTransform: 'capitalize' }}>{(f.billing_mode || 'manual').replace('_', ' ')} billing</div>
+                <div style={{ fontSize: 11, color: C.muted2 }}>{bits.join(' · ') || 'manual billing'}</div>
               </div>
               <div style={{ fontSize: 14, fontWeight: 700, color: bal > 0 ? C.red : C.green }}>{money(bal)}</div>
             </Card>
@@ -128,13 +134,8 @@ export function FamilyBill({ family, charges, payments, onBack, canEdit, onChang
   if (barn?.cashapp) pays.push({ label: 'Cash App', color: '#00c244', href: `https://cash.app/$${barn.cashapp.replace(/^\$/, '')}` });
   if (barn?.paypal) pays.push({ label: 'PayPal', color: '#003087', href: `https://paypal.me/${barn.paypal.replace(/^@/, '')}` });
 
-  async function setMode(mode: string) {
-    let fee = family.monthly_fee || 0;
-    if (mode === 'monthly') {
-      const v = prompt('Monthly fee amount for this family?', String(fee || '')); if (v === null) return;
-      fee = Number(v) || 0;
-    }
-    await supabase.from('families').update({ billing_mode: mode, monthly_fee: fee }).eq('id', family.id);
+  async function setField(patch: Record<string, any>) {
+    await supabase.from('families').update(patch).eq('id', family.id);
     onChange();
   }
   async function addCharge() {
@@ -155,12 +156,7 @@ export function FamilyBill({ family, charges, payments, onBack, canEdit, onChang
     onChange();
   }
 
-  const modeBtn = (m: string, label: string) => (
-    <button onClick={() => setMode(m)} style={{
-      flex: 1, border: 'none', borderRadius: 10, padding: '9px 4px', fontSize: 12, fontWeight: 700,
-      background: (family.billing_mode || 'manual') === m ? C.navy : '#fff', color: (family.billing_mode || 'manual') === m ? '#fff' : C.muted,
-    }}>{label}</button>
-  );
+  const fInp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', fontFamily: 'inherit' };
 
   const rows = [
     ...charges.map(c => ({ k: c.id, d: c.created_at, label: c.label || 'Charge', amt: Number(c.amount), kind: 'charge' as const })),
@@ -184,15 +180,24 @@ export function FamilyBill({ family, charges, payments, onBack, canEdit, onChang
 
       {canEdit && (
         <>
-          <SectionLabel>Billing type</SectionLabel>
-          <div style={{ display: 'flex', gap: 7 }}>
-            {modeBtn('manual', 'Manual')}
-            {modeBtn('monthly', 'Monthly')}
-            {modeBtn('per_lesson', 'Per lesson')}
+          <SectionLabel>Monthly charges</SectionLabel>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Monthly / training fee ($)</div>
+              <input style={fInp} defaultValue={String(family.monthly_fee || '')} inputMode="decimal" placeholder="0" onBlur={e => setField({ monthly_fee: Number(e.target.value) || 0 })} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Monthly board ($)</div>
+              <input style={fInp} defaultValue={String(family.board_fee || '')} inputMode="decimal" placeholder="0" onBlur={e => setField({ board_fee: Number(e.target.value) || 0 })} />
+            </div>
           </div>
-          {family.billing_mode === 'monthly' && (
-            <div style={{ fontSize: 11.5, color: C.muted2, marginTop: 6 }}>Monthly fee: {money(family.monthly_fee || 0)} · tap “Monthly” again to change.</div>
-          )}
+          <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Auto-charge each lesson's fee</span>
+            <input type="checkbox" defaultChecked={family.billing_mode === 'per_lesson'} onChange={e => setField({ billing_mode: e.target.checked ? 'per_lesson' : 'manual' })} style={{ width: 20, height: 20 }} />
+          </Card>
+          <div style={{ fontSize: 11, color: C.muted2, marginTop: 6, lineHeight: 1.4 }}>
+            Monthly fee &amp; board post when you tap “Run billing for this month” on the Billing screen. Board is for families keeping a horse at the barn.
+          </div>
         </>
       )}
 

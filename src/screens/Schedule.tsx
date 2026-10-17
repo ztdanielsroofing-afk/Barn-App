@@ -421,6 +421,10 @@ function ArenaDay({ date }: { date: Date }) {
   const dk = dayKey(date);
   const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
   const { data: bookings, reload } = useTable<ArenaBooking>('arena_bookings', q => q.eq('date', dk));
+  // All pending requests across every day (for staff to review in one place).
+  const { data: pending, reload: reloadPending } = useTable<ArenaBooking>('arena_bookings', q => q.eq('status', 'requested').order('date'));
+
+  function refreshAll() { reload(); reloadPending(); }
 
   const dayOpen = barn?.arena_days ? barn.arena_days[String(date.getDay())] !== false : true;
   const slots = buildSlots(barn?.arena_open, barn?.arena_close, barn?.arena_slot_min);
@@ -439,14 +443,10 @@ function ArenaDay({ date }: { date: Date }) {
       barn_id: barn?.id, family_id: user?.family_id || null, rider_name: user?.full_name || null,
       date: dk, start_label: slot, status: isStaff ? 'approved' : 'requested',
     });
-    reload();
+    refreshAll();
   }
-  async function setStatus(id: string, status: string) { await supabase.from('arena_bookings').update({ status }).eq('id', id); reload(); }
-  async function remove(id: string) { await supabase.from('arena_bookings').delete().eq('id', id); reload(); }
-
-  if (!dayOpen) {
-    return <div style={{ textAlign: 'center', color: C.muted2, fontSize: 13, padding: '22px 12px', marginTop: 12, background: 'rgba(255,255,255,0.5)', borderRadius: 14 }}>Arena is closed on {date.toLocaleDateString(undefined, { weekday: 'long' })}.</div>;
-  }
+  async function setStatus(id: string, status: string) { await supabase.from('arena_bookings').update({ status }).eq('id', id); refreshAll(); }
+  async function remove(id: string) { await supabase.from('arena_bookings').delete().eq('id', id); refreshAll(); }
 
   const COLORS: Record<string, { c: string; label: string }> = {
     open: { c: C.green, label: 'Open' },
@@ -455,8 +455,36 @@ function ArenaDay({ date }: { date: Date }) {
     booked: { c: C.navy, label: 'Booked' },
   };
 
+  const PendingRequests = isStaff && pending.length > 0 ? (
+    <>
+      <SectionLabel>Arena requests to approve ({pending.length})</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 6 }}>
+        {pending.map(b => (
+          <div key={b.id} style={{ background: C.goldTint, borderRadius: 12, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{b.rider_name || 'Rider'}</div>
+              <div style={{ fontSize: 11, color: C.muted2 }}>{new Date(b.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} · {b.start_label}</div>
+            </div>
+            <button onClick={() => setStatus(b.id, 'approved')} style={actBtn(C.green)}>Approve</button>
+            <button onClick={() => setStatus(b.id, 'denied')} style={actBtn(C.red)}>Deny</button>
+          </div>
+        ))}
+      </div>
+    </>
+  ) : null;
+
+  if (!dayOpen) {
+    return (
+      <>
+        {PendingRequests}
+        <div style={{ textAlign: 'center', color: C.muted2, fontSize: 13, padding: '22px 12px', marginTop: 12, background: 'rgba(255,255,255,0.5)', borderRadius: 14 }}>Arena is closed on {date.toLocaleDateString(undefined, { weekday: 'long' })}.</div>
+      </>
+    );
+  }
+
   return (
     <>
+      {PendingRequests}
       <SectionLabel>{date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · arena</SectionLabel>
       <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
         {Object.values(COLORS).map(v => (

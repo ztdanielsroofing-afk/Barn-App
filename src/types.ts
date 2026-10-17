@@ -56,8 +56,9 @@ export interface Family {
   status: string;
   balance: number;
   onboarded?: boolean;
-  billing_mode?: string | null;   // 'monthly' | 'per_lesson' | 'manual'
+  billing_mode?: string | null;   // 'per_lesson' on = auto-charge lessons
   monthly_fee?: number | null;
+  board_fee?: number | null;
   created_at?: string;
 }
 
