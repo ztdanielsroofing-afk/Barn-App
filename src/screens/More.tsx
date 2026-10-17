@@ -117,7 +117,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 12
+        Signed in as {user?.email} · {role} · build 13
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -843,6 +843,11 @@ function Documents() {
     );
   }
 
+  if (open && !isStaff) {
+    const mySig = sigs.find(s => s.document_id === open.id && s.family_id === user?.family_id);
+    return <ClientDocView doc={open} sig={mySig} onBack={() => setOpen(null)} />;
+  }
+
   const visible = isStaff ? docs : docs.filter(d => d.active);
   const mySignedIds = new Set(sigs.filter(s => s.family_id === user?.family_id).map(s => s.document_id));
 
@@ -856,7 +861,7 @@ function Documents() {
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {visible.map(d => (
-          <Card key={d.id} onClick={() => isStaff && setOpen(d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Card key={d.id} onClick={() => setOpen(d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{d.title}</div>
               <div style={{ fontSize: 11, color: C.muted2 }}>
@@ -906,6 +911,30 @@ function AddDocModal({ barnId, onClose, onSaved }: { barnId?: string; onClose: (
         <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
       </div>
     </div>
+  );
+}
+
+function ClientDocView({ doc, sig, onBack }: { doc: BarnDocument; sig?: Signature; onBack: () => void }) {
+  return (
+    <>
+      <button onClick={onBack} style={backBtn}>‹ Documents</button>
+      <div style={{ fontFamily: serif, fontSize: 24, color: C.navy }}>{doc.title}</div>
+      <div style={{ marginBottom: 12 }}>
+        <Pill color={sig ? C.green : C.gold}>{sig ? 'Signed' : 'Not signed'}</Pill>
+      </div>
+      <Card style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: C.text, lineHeight: 1.6 }}>{doc.body || 'No document text.'}</Card>
+      {sig && (
+        <>
+          <SectionLabel>Your signature</SectionLabel>
+          <Card>
+            {sig.method === 'drawn' && sig.signature_data
+              ? <img src={sig.signature_data} alt="signature" style={{ height: 52 }} />
+              : <div style={{ fontFamily: serif, fontSize: 22, color: C.navy }}>{sig.signer_name || sig.signature_data}</div>}
+            <div style={{ fontSize: 11.5, color: C.muted2, marginTop: 6 }}>Signed {new Date(sig.signed_at).toLocaleDateString()}</div>
+          </Card>
+        </>
+      )}
+    </>
   );
 }
 
