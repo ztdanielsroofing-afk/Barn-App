@@ -194,7 +194,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
 
         <div style={lbl}>Rider</div>
         {riders.length > 0 && (
-          <select value="" onChange={e => pickRider(e.target.value)} style={inp}>
+          <select value={riders.find(r => r.full_name === riderName)?.id || ''} onChange={e => pickRider(e.target.value)} style={inp}>
             <option value="">Pick a rider…</option>
             {riders.map(r => <option key={r.id} value={r.id}>{r.full_name}</option>)}
           </select>

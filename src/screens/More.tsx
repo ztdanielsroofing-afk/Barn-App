@@ -125,7 +125,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 15
+        Signed in as {user?.email} · {role} · build 16
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -1071,7 +1071,7 @@ function MyBill() {
   const { data: payments, reload: reloadP } = useTable<Payment>('payments', q => q.eq('family_id', user?.family_id));
   const fam = families[0];
   if (!user?.family_id || !fam) return <Empty>No bill on file yet.</Empty>;
-  return <FamilyBill family={fam} charges={charges} payments={payments} onBack={() => history.back()} canEdit={false} onChange={() => { reloadC(); reloadP(); }} />;
+  return <FamilyBill family={fam} charges={charges} payments={payments} onBack={() => {}} hideBack canEdit={false} onChange={() => { reloadC(); reloadP(); }} />;
 }
 
 /* ---------------- Profile ---------------- */

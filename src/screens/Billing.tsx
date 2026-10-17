@@ -122,10 +122,10 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
   );
 }
 
-export function FamilyBill({ family, charges, payments, onBack, canEdit, onChange }:
+export function FamilyBill({ family, charges, payments, onBack, canEdit, onChange, hideBack }:
   {
     family: Family; charges: Charge[]; payments: Payment[];
-    onBack: () => void; canEdit: boolean; onChange: () => void;
+    onBack: () => void; canEdit: boolean; onChange: () => void; hideBack?: boolean;
   }) {
   const { barn } = useApp();
   const chg = charges.reduce((s, x) => s + Number(x.amount || 0), 0);
@@ -168,7 +168,7 @@ export function FamilyBill({ family, charges, payments, onBack, canEdit, onChang
 
   return (
     <Page>
-      <button onClick={onBack} style={{ background: '#fff', border: 'none', borderRadius: 11, padding: '8px 13px', fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 12 }}>‹ Back</button>
+      {!hideBack && <button onClick={onBack} style={{ background: '#fff', border: 'none', borderRadius: 11, padding: '8px 13px', fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 12 }}>‹ Back</button>}
       <div style={{ fontFamily: serif, fontSize: 25, color: C.navy }}>{family.family_name}</div>
       <div style={{ fontSize: 12, color: C.muted2, marginBottom: 12 }}>{family.contact_name || ''}{family.phone ? ` · ${family.phone}` : ''}</div>
 
