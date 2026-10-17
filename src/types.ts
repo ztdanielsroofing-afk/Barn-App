@@ -10,6 +10,21 @@ export interface Barn {
   paypal: string | null;
   cashapp: string | null;
   head_can_edit_billing: boolean;
+  arena_open?: string | null;
+  arena_close?: string | null;
+  arena_days?: Record<string, boolean> | null;
+  arena_slot_min?: number | null;
+  created_at?: string;
+}
+
+export interface ArenaBooking {
+  id: string;
+  barn_id: string;
+  family_id: string | null;
+  rider_name: string | null;
+  date: string;
+  start_label: string;
+  status: string;   // 'requested' | 'approved' | 'denied'
   created_at?: string;
 }
 
@@ -22,6 +37,8 @@ export interface AppUser {
   email: string;
   family_id: string | null;
   phone?: string | null;
+  pay_type?: string | null;   // 'per_lesson' | 'hourly' | 'percent' | 'manual'
+  pay_rate?: number | null;
   created_at?: string;
 }
 
@@ -39,7 +56,19 @@ export interface Family {
   status: string;
   balance: number;
   onboarded?: boolean;
+  billing_mode?: string | null;   // 'monthly' | 'per_lesson' | 'manual'
+  monthly_fee?: number | null;
   created_at?: string;
+}
+
+export interface Charge {
+  id: string;
+  barn_id: string;
+  family_id: string | null;
+  label: string | null;
+  amount: number;
+  lesson_id: string | null;
+  created_at: string;
 }
 
 export interface Rider {

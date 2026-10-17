@@ -5,14 +5,15 @@ import { BrandHeader } from './Header';
 import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { Nav } from '../App';
-import { Lesson, Horse, Invoice, Family } from '../types';
+import { Lesson, Horse, Charge, Payment, Family } from '../types';
 
 export default function Home({ nav }: { nav: Nav }) {
   const { user, isClient, isStaff, canViewBilling } = useApp();
   const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
   const { data: horses } = useTable<Horse>('horses', q => q.order('farrier_next'));
-  const { data: invoices } = useTable<Invoice>('invoices');
-  const { data: _families } = useTable<Family>('families');
+  const { data: charges } = useTable<Charge>('charges');
+  const { data: payments } = useTable<Payment>('payments');
+  const { data: families } = useTable<Family>('families');
 
   const todayKey = new Date().toISOString().slice(0, 10);
   const upcoming = useMemo(
@@ -21,13 +22,16 @@ export default function Home({ nav }: { nav: Nav }) {
   );
 
   const careDue = horses.filter(h => h.care_level === 'soon' || h.care_level === 'overdue');
-  const overdue = invoices.filter(i => i.status === 'overdue');
+  const balOf = (fid: string) =>
+    charges.filter(c => c.family_id === fid).reduce((s, c) => s + Number(c.amount || 0), 0) -
+    payments.filter(p => p.family_id === fid).reduce((s, p) => s + Number(p.amount || 0), 0);
+  const overdue = families.filter(f => balOf(f.id) > 0);
+  const myBalance = isClient && user?.family_id ? balOf(user.family_id) : 0;
 
   const jump = isClient
     ? [{ l: 'Schedule', t: 'calendar' }, { l: 'My Horse', t: 'horses' }, { l: 'My Bill', t: 'more', s: 'mybill' }]
     : [{ l: 'Admin Overview', t: 'more', s: 'overview' }, { l: 'Schedule', t: 'calendar' }, { l: 'Horses', t: 'horses' }, { l: 'Clients', t: 'more', s: 'clients' }, { l: 'Care', t: 'more', s: 'care' }];
 
-  const myInvoice = isClient ? invoices.find(i => i.family_id === user?.family_id && Number(i.due) > 0) : null;
 
   return (
     <div>
@@ -45,12 +49,12 @@ export default function Home({ nav }: { nav: Nav }) {
           ))}
         </div>
 
-        {isClient && myInvoice && (
+        {isClient && myBalance > 0 && (
           <>
             <SectionLabel>Your balance</SectionLabel>
             <Card onClick={() => nav.go('more', 'mybill')} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontFamily: serif, fontSize: 24, color: C.red }}>{money(myInvoice.due)}</div>
+                <div style={{ fontFamily: serif, fontSize: 24, color: C.red }}>{money(myBalance)}</div>
                 <div style={{ fontSize: 11.5, color: C.muted2 }}>Tap to view & pay</div>
               </div>
               <Pill color={C.red}>due</Pill>

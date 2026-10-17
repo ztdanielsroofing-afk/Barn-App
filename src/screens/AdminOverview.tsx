@@ -4,7 +4,7 @@ import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { Nav } from '../App';
 import {
-  Family, Horse, Rider, Lesson, Invoice, Payment, DocRow, AppUser, TaskRow,
+  Family, Horse, Rider, Lesson, Charge, Payment, BarnDocument, Signature, AppUser, TaskRow,
 } from '../types';
 
 export default function AdminOverview({ nav }: { nav: Nav }) {
@@ -14,22 +14,26 @@ export default function AdminOverview({ nav }: { nav: Nav }) {
   const { data: riders } = useTable<Rider>('riders');
   const { data: staff } = useTable<AppUser>('users', q => q.neq('role', 'client'));
   const { data: lessons } = useTable<Lesson>('lessons');
-  const { data: invoices } = useTable<Invoice>('invoices');
+  const { data: charges } = useTable<Charge>('charges');
   const { data: payments } = useTable<Payment>('payments');
-  const { data: docs } = useTable<DocRow>('documents');
+  const { data: bdocs } = useTable<BarnDocument>('barn_documents', q => q.eq('active', true).eq('required', true));
+  const { data: sigs } = useTable<Signature>('signatures');
   const { data: tasks } = useTable<TaskRow>('tasks');
 
   const barnOwned = horses.filter(h => h.barn_owned).length;
   const boarders = horses.length - barnOwned;
 
-  const invoiced = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
+  const balOf = (fid: string) =>
+    charges.filter(c => c.family_id === fid).reduce((s, c) => s + Number(c.amount || 0), 0) -
+    payments.filter(p => p.family_id === fid).reduce((s, p) => s + Number(p.amount || 0), 0);
+  const charged = charges.reduce((s, c) => s + Number(c.amount || 0), 0);
   const collected = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-  const outstanding = invoices.reduce((s, i) => s + Number(i.due || 0), 0);
-  const overdue = invoices.filter(i => i.status === 'overdue');
+  const outstanding = charged - collected;
+  const overdueFamilies = families.filter(f => balOf(f.id) > 0);
 
   const careDue = horses.filter(h => h.care_level === 'soon' || h.care_level === 'overdue');
   const critical = horses.filter(h => (h.critical_notes || []).length > 0);
-  const docsNeed = docs.filter(d => d.status !== 'signed');
+  const famMissingDocs = families.filter(f => bdocs.some(d => !sigs.some(s => s.document_id === d.id && s.family_id === f.id)));
   const openTasks = tasks.filter(t => !t.done);
 
   const stats: { n: string; l: string; go: () => void }[] = [
@@ -43,12 +47,12 @@ export default function AdminOverview({ nav }: { nav: Nav }) {
 
   type Flag = { title: string; count: number; color: string; bg: string; go: () => void; detail?: string };
   const flags: Flag[] = [];
-  if (canViewBilling && overdue.length)
-    flags.push({ title: 'Overdue accounts', count: overdue.length, color: C.red, bg: C.redBg, go: () => nav.go('billing'), detail: money(overdue.reduce((s, i) => s + Number(i.due || 0), 0)) + ' outstanding' });
+  if (canViewBilling && overdueFamilies.length)
+    flags.push({ title: 'Accounts with a balance', count: overdueFamilies.length, color: C.red, bg: C.redBg, go: () => nav.go('billing'), detail: money(outstanding) + ' outstanding' });
   if (careDue.length)
     flags.push({ title: 'Farrier / vet due soon', count: careDue.length, color: C.gold, bg: C.goldTint, go: () => nav.go('more', 'care'), detail: careDue.slice(0, 3).map(h => h.name).join(', ') });
-  if (docsNeed.length)
-    flags.push({ title: 'Documents unsigned / expiring', count: docsNeed.length, color: C.purple, bg: C.purpleBg, go: () => nav.go('more', 'documents') });
+  if (famMissingDocs.length)
+    flags.push({ title: 'Families with unsigned documents', count: famMissingDocs.length, color: C.purple, bg: C.purpleBg, go: () => nav.go('more', 'documents') });
   if (critical.length)
     flags.push({ title: 'Horses with critical notes', count: critical.length, color: C.red, bg: C.redBg, go: () => nav.go('horses'), detail: critical.slice(0, 3).map(h => h.name).join(', ') });
 
@@ -70,7 +74,7 @@ export default function AdminOverview({ nav }: { nav: Nav }) {
         <>
           <SectionLabel>Money</SectionLabel>
           <Card>
-            <MoneyRow l="Invoiced" v={money(invoiced)} c={C.navy} />
+            <MoneyRow l="Charged" v={money(charged)} c={C.navy} />
             <MoneyRow l="Collected" v={money(collected)} c={C.green} />
             <MoneyRow l="Outstanding" v={money(outstanding)} c={outstanding > 0 ? C.red : C.green} last />
             <button onClick={() => nav.go('billing')} style={jump}>Open Billing →</button>

@@ -4,7 +4,7 @@ import { Card, SectionLabel, Pill, Button } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
-import { Lesson, Horse, Rider, AppUser } from '../types';
+import { Lesson, Horse, Rider, AppUser, ArenaBooking } from '../types';
 import { useApp } from '../AppContext';
 import { Nav } from '../App';
 
@@ -21,6 +21,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
   const [open, setOpen] = useState<Lesson | null>(null);
   const [req, setReq] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useState<'lessons' | 'arena'>('lessons');
 
   const { data: lessons, reload } = useTable<Lesson>('lessons', q => q.order('starts_at'));
 
@@ -81,6 +82,12 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
         </div>
       </Card>
 
+      <div style={{ display: 'flex', gap: 7, marginTop: 16 }}>
+        <button onClick={() => setMode('lessons')} style={{ flex: 1, border: 'none', borderRadius: 10, padding: '9px 4px', fontSize: 12.5, fontWeight: 700, background: mode === 'lessons' ? C.navy : '#fff', color: mode === 'lessons' ? '#fff' : C.muted }}>Lessons</button>
+        <button onClick={() => setMode('arena')} style={{ flex: 1, border: 'none', borderRadius: 10, padding: '9px 4px', fontSize: 12.5, fontWeight: 700, background: mode === 'arena' ? C.navy : '#fff', color: mode === 'arena' ? '#fff' : C.muted }}>Open Arena</button>
+      </div>
+
+      {mode === 'arena' ? <ArenaDay date={sel} /> : (<>
       <SectionLabel>{sel.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {dayItems.map(l => (
@@ -110,6 +117,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
           <Button kind="soft" onClick={() => setReq(true)}>Request a schedule change</Button>
         </div>
       )}
+      </>)}
       {req && <RequestSheet onClose={() => setReq(false)} />}
       {adding && <AddLessonSheet day={sel} onClose={() => setAdding(false)} onSaved={reload} />}
     </Page>
@@ -383,3 +391,117 @@ function RequestSheet({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
+
+/* ---------------- Open Arena availability ---------------- */
+function parseTime(label?: string | null): number | null {
+  if (!label) return null;
+  const m = /(\d{1,2}):(\d{2})\s*([AaPp][Mm])/.exec(label);
+  if (!m) return null;
+  let h = Number(m[1]) % 12;
+  if (/[Pp]/.test(m[3])) h += 12;
+  return h * 60 + Number(m[2]);
+}
+function fmtTime(mins: number): string {
+  let h = Math.floor(mins / 60); const mm = mins % 60;
+  const ap = h >= 12 ? 'PM' : 'AM'; let hh = h % 12; if (hh === 0) hh = 12;
+  return `${hh}:${String(mm).padStart(2, '0')} ${ap}`;
+}
+function buildSlots(open?: string | null, close?: string | null, step?: number | null): string[] {
+  const a = parseTime(open) ?? 7 * 60;
+  const b = parseTime(close) ?? 19 * 60;
+  const s = Number(step) || 60;
+  const out: string[] = [];
+  for (let t = a; t < b; t += s) out.push(fmtTime(t));
+  return out;
+}
+const norm = (s?: string | null) => (s || '').replace(/\s+/g, '').toUpperCase();
+
+function ArenaDay({ date }: { date: Date }) {
+  const { barn, isStaff, user } = useApp();
+  const dk = dayKey(date);
+  const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
+  const { data: bookings, reload } = useTable<ArenaBooking>('arena_bookings', q => q.eq('date', dk));
+
+  const dayOpen = barn?.arena_days ? barn.arena_days[String(date.getDay())] !== false : true;
+  const slots = buildSlots(barn?.arena_open, barn?.arena_close, barn?.arena_slot_min);
+  const dayLessons = lessons.filter(l => l.starts_at.slice(0, 10) === dk);
+
+  function slotInfo(slot: string) {
+    const booking = bookings.find(b => b.start_label === slot && b.status !== 'denied');
+    if (booking) return { state: booking.status === 'approved' ? 'booked' : 'requested', booking } as const;
+    const lesson = dayLessons.find(l => norm(l.time_label) === norm(slot));
+    if (lesson) return { state: 'lesson', lesson } as const;
+    return { state: 'open' } as const;
+  }
+
+  async function request(slot: string) {
+    await supabase.from('arena_bookings').insert({
+      barn_id: barn?.id, family_id: user?.family_id || null, rider_name: user?.full_name || null,
+      date: dk, start_label: slot, status: isStaff ? 'approved' : 'requested',
+    });
+    reload();
+  }
+  async function setStatus(id: string, status: string) { await supabase.from('arena_bookings').update({ status }).eq('id', id); reload(); }
+  async function remove(id: string) { await supabase.from('arena_bookings').delete().eq('id', id); reload(); }
+
+  if (!dayOpen) {
+    return <div style={{ textAlign: 'center', color: C.muted2, fontSize: 13, padding: '22px 12px', marginTop: 12, background: 'rgba(255,255,255,0.5)', borderRadius: 14 }}>Arena is closed on {date.toLocaleDateString(undefined, { weekday: 'long' })}.</div>;
+  }
+
+  const COLORS: Record<string, { c: string; label: string }> = {
+    open: { c: C.green, label: 'Open' },
+    lesson: { c: C.red, label: 'Lesson' },
+    requested: { c: C.gold, label: 'Requested' },
+    booked: { c: C.navy, label: 'Booked' },
+  };
+
+  return (
+    <>
+      <SectionLabel>{date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · arena</SectionLabel>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+        {Object.values(COLORS).map(v => (
+          <span key={v.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: C.muted2 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: v.c }} />{v.label}
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {slots.map(slot => {
+          const info = slotInfo(slot);
+          const col = COLORS[info.state];
+          return (
+            <div key={slot} style={{ background: '#fff', borderRadius: 12, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 11 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 3, background: col.c, flex: 'none' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{slot}</span>
+                <span style={{ fontSize: 12, color: col.c, fontWeight: 700, marginLeft: 8 }}>{col.label}</span>
+                {info.state !== 'open' && info.state !== 'lesson' && info.booking?.rider_name && (
+                  <span style={{ fontSize: 11, color: C.muted2, marginLeft: 6 }}>· {info.booking.rider_name}</span>
+                )}
+              </div>
+              {/* actions */}
+              {info.state === 'open' && !isStaff && (
+                <button onClick={() => request(slot)} style={actBtn(C.green)}>Request</button>
+              )}
+              {info.state === 'open' && isStaff && (
+                <button onClick={() => request(slot)} style={actBtn(C.navy)}>Block</button>
+              )}
+              {info.state === 'requested' && isStaff && info.booking && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => setStatus(info.booking!.id, 'approved')} style={actBtn(C.green)}>Approve</button>
+                  <button onClick={() => setStatus(info.booking!.id, 'denied')} style={actBtn(C.red)}>Deny</button>
+                </div>
+              )}
+              {info.state === 'booked' && isStaff && info.booking && (
+                <button onClick={() => remove(info.booking!.id)} style={actBtn(C.red)}>Free up</button>
+              )}
+              {info.state === 'requested' && !isStaff && <span style={{ fontSize: 11, color: C.muted2 }}>pending</span>}
+            </div>
+          );
+        })}
+        {slots.length === 0 && <div style={{ textAlign: 'center', color: C.muted2, fontSize: 13, padding: 16 }}>Set your arena hours in Barn Settings.</div>}
+      </div>
+    </>
+  );
+}
+const actBtn = (color: string): React.CSSProperties => ({ background: color + '1a', color, border: 'none', borderRadius: 9, padding: '7px 11px', fontSize: 11.5, fontWeight: 800, flex: 'none' });

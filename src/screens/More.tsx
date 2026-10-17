@@ -5,7 +5,7 @@ import { supabase } from '../supabase';
 import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { Nav } from '../App';
-import { Family, Invoice, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature } from '../types';
+import { Family, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature, Charge, Payment, Lesson } from '../types';
 import { FamilyBill } from './Billing';
 import AdminOverview from './AdminOverview';
 import { sendInvite } from '../invites';
@@ -117,7 +117,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 11
+        Signed in as {user?.email} · {role} · build 12
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -128,7 +128,8 @@ function SignOut() {
 function Clients({ nav: _nav }: { nav: Nav }) {
   const { canEditBilling, barn } = useApp();
   const { data: families, reload } = useTable<Family>('families', q => q.order('family_name'));
-  const { data: invoices } = useTable<Invoice>('invoices');
+  const { data: charges, reload: reloadC } = useTable<Charge>('charges');
+  const { data: payments, reload: reloadP } = useTable<Payment>('payments');
   const { data: riders } = useTable<Rider>('riders', q => q.order('full_name'));
   const [open, setOpen] = useState<Family | null>(null);
   const [bill, setBill] = useState(false);
@@ -141,7 +142,16 @@ function Clients({ nav: _nav }: { nav: Nav }) {
     setOpen(null); reload();
   }
 
-  if (open && bill) return <FamilyBill family={open} invoice={invoices.find(i => i.family_id === open.id)} onBack={() => setBill(false)} canEdit={canEditBilling} />;
+  if (open && bill) return (
+    <FamilyBill
+      family={open}
+      charges={charges.filter(c => c.family_id === open.id)}
+      payments={payments.filter(p => p.family_id === open.id)}
+      onBack={() => { setBill(false); reloadC(); reloadP(); }}
+      canEdit={canEditBilling}
+      onChange={() => { reloadC(); reloadP(); reload(); }}
+    />
+  );
   if (open) return (
     <FamilyDetail
       family={open}
@@ -646,39 +656,140 @@ function Marketplace() {
 
 /* ---------------- Financial Reports ---------------- */
 function Reports() {
-  const { data: invoices } = useTable<Invoice>('invoices');
-  const { data: payments } = useTable<any>('payments');
-  const invoiced = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
-  const collected = payments.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
-  const outstanding = invoices.reduce((s, i) => s + Number(i.due || 0), 0);
+  const { data: charges } = useTable<Charge>('charges');
+  const { data: payments } = useTable<Payment>('payments');
+  const charged = charges.reduce((s, c) => s + Number(c.amount || 0), 0);
+  const collected = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const outstanding = charged - collected;
   return (
     <>
       <H>Financial Reports</H>
       <Card>
-        <Row l="Total invoiced" v={money(invoiced)} />
+        <Row l="Total charged" v={money(charged)} />
         <Row l="Collected" v={money(collected)} />
         <Row l="Outstanding" v={money(outstanding)} last />
       </Card>
       <div style={{ fontSize: 12, color: C.muted2, marginTop: 12, lineHeight: 1.5 }}>
-        Figures are across all current invoices and recorded payments.
+        Figures are across all charges and recorded payments.
       </div>
     </>
   );
 }
 
-/* ---------------- Pay ---------------- */
+/* ---------------- Trainer Pay ---------------- */
+const PAY_LABEL: Record<string, string> = { per_lesson: 'per lesson', hourly: 'per hour', percent: '% of lesson fee', manual: 'manual' };
+
+function payFor(t: AppUser, ls: Lesson[]) {
+  const count = ls.length;
+  const hours = ls.reduce((s, l) => s + (Number(l.duration_min) || 60) / 60, 0);
+  const feeSum = ls.reduce((s, l) => s + Number(l.fee || 0), 0);
+  const rate = Number(t.pay_rate || 0);
+  if (t.pay_type === 'per_lesson') return rate * count;
+  if (t.pay_type === 'hourly') return rate * hours;
+  if (t.pay_type === 'percent') return feeSum * rate / 100;
+  return 0;
+}
+
 function Pay() {
-  const { canViewBilling } = useApp();
+  const { canViewBilling, user } = useApp();
+  const { data: staff, reload } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
+  const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
+  const [period, setPeriod] = useState<'week' | 'month' | 'all'>('month');
+  const [edit, setEdit] = useState<AppUser | null>(null);
+
+  const now = new Date();
+  const start = new Date(now);
+  if (period === 'week') { start.setDate(now.getDate() - now.getDay()); start.setHours(0, 0, 0, 0); }
+  else if (period === 'month') { start.setDate(1); start.setHours(0, 0, 0, 0); }
+  else { start.setFullYear(2000); }
+  const inRange = (iso: string) => new Date(iso) >= start;
+
+  const shown = canViewBilling ? staff : staff.filter(s => s.id === user?.id);
+
+  const periodBtn = (p: typeof period, l: string) => (
+    <button key={p} onClick={() => setPeriod(p)} style={{ flex: 1, border: 'none', borderRadius: 10, padding: '9px 4px', fontSize: 12.5, fontWeight: 700, background: period === p ? C.navy : '#fff', color: period === p ? '#fff' : C.muted }}>{l}</button>
+  );
+
   return (
     <>
       <H>{canViewBilling ? 'Trainer Pay' : 'My Pay'}</H>
-      <Card>
-        <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6 }}>
-          Track lesson counts and trainer payouts here. Log completed lessons on the Schedule and
-          they’ll roll up for pay periods.
-        </div>
-      </Card>
+      <div style={{ display: 'flex', gap: 7, marginBottom: 12 }}>
+        {periodBtn('week', 'This week')}
+        {periodBtn('month', 'This month')}
+        {periodBtn('all', 'All time')}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {shown.map(t => {
+          const ls = lessons.filter(l => l.trainer_id === t.id && inRange(l.starts_at));
+          const amt = payFor(t, ls);
+          const configured = !!t.pay_type && t.pay_type !== 'manual';
+          return (
+            <Card key={t.id}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{t.full_name || t.email}</div>
+                  <div style={{ fontSize: 11, color: C.muted2 }}>
+                    {ls.length} lesson{ls.length === 1 ? '' : 's'}
+                    {t.pay_type ? ` · ${money(Number(t.pay_rate || 0))}${t.pay_type === 'percent' ? '%' : ''} ${PAY_LABEL[t.pay_type]}` : ' · pay not set'}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontFamily: serif, fontSize: 20, color: C.green }}>{configured ? money(amt) : '—'}</div>
+                </div>
+              </div>
+              {canViewBilling && (
+                <button onClick={() => setEdit(t)} style={{ ...chip, marginTop: 10 }}>{t.pay_type ? 'Edit pay' : 'Set pay'}</button>
+              )}
+            </Card>
+          );
+        })}
+        {shown.length === 0 && <Empty>No trainers yet.</Empty>}
+      </div>
+
+      <div style={{ fontSize: 11, color: C.muted2, marginTop: 12, lineHeight: 1.5 }}>
+        Totals count lessons assigned to each trainer in the selected period. Set each person's pay type (per lesson, hourly, or a percentage of the lesson fee).
+      </div>
+
+      {edit && <PayConfigModal staff={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
     </>
+  );
+}
+
+function PayConfigModal({ staff, onClose, onSaved }: { staff: AppUser; onClose: () => void; onSaved: () => void }) {
+  const [type, setType] = useState(staff.pay_type || 'per_lesson');
+  const [rate, setRate] = useState(String(staff.pay_rate ?? ''));
+  const [busy, setBusy] = useState(false);
+  const rateLabel = type === 'per_lesson' ? 'Amount per lesson ($)' : type === 'hourly' ? 'Amount per hour ($)' : type === 'percent' ? 'Percent of lesson fee (%)' : 'Rate';
+
+  async function save() {
+    setBusy(true);
+    await supabase.from('users').update({ pay_type: type, pay_rate: Number(rate) || 0 }).eq('id', staff.id);
+    setBusy(false); onSaved();
+  }
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', marginBottom: 10, fontFamily: 'inherit' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px' }}>
+        <div style={{ fontFamily: serif, fontSize: 23, color: C.navy, marginBottom: 2 }}>Pay for {staff.full_name || staff.email}</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>How is this person paid?</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 12 }}>
+          {([['per_lesson', 'Per lesson'], ['hourly', 'Hourly'], ['percent', '% of fee'], ['manual', 'Manual']] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setType(v)} style={{ border: 'none', borderRadius: 10, padding: '11px 4px', fontSize: 12.5, fontWeight: 700, background: type === v ? C.navy : '#fff', color: type === v ? '#fff' : C.muted }}>{l}</button>
+          ))}
+        </div>
+        {type !== 'manual' && (
+          <>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>{rateLabel}</div>
+            <input style={inp} value={rate} onChange={e => setRate(e.target.value)} inputMode="decimal" placeholder="0" />
+          </>
+        )}
+        {type === 'manual' && <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 10 }}>You'll track this person's pay yourself; the app won't auto-calculate it.</div>}
+        <Button disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 
@@ -856,6 +967,33 @@ function Settings() {
       <input style={inp} defaultValue={barn.cashapp || ''} placeholder="Cash App $cashtag" onBlur={e => set({ cashapp: e.target.value }, 'cashapp')} />
       <input style={inp} defaultValue={barn.paypal || ''} placeholder="PayPal.me handle" onBlur={e => set({ paypal: e.target.value }, 'paypal')} />
 
+      <SectionLabel>Arena hours (for open-ride availability)</SectionLabel>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Opens</div>
+          <input style={inp} defaultValue={barn.arena_open || '7:00 AM'} placeholder="7:00 AM" onBlur={e => set({ arena_open: e.target.value }, 'ao')} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Closes</div>
+          <input style={inp} defaultValue={barn.arena_close || '7:00 PM'} placeholder="7:00 PM" onBlur={e => set({ arena_close: e.target.value }, 'ac')} />
+        </div>
+      </div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Time-slot length (minutes)</div>
+      <input style={inp} defaultValue={String(barn.arena_slot_min || 60)} inputMode="numeric" onBlur={e => set({ arena_slot_min: Number(e.target.value) || 60 }, 'as')} />
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 6 }}>Days open</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => {
+          const days = barn.arena_days || {};
+          const on = days[String(i)] !== false;
+          return (
+            <button key={i} onClick={() => set({ arena_days: { ...days, [String(i)]: !on } }, 'ad')} style={{
+              border: 'none', borderRadius: 10, padding: '9px 11px', fontSize: 12, fontWeight: 700,
+              background: on ? C.navy : '#fff', color: on ? '#fff' : C.muted,
+            }}>{d}</button>
+          );
+        })}
+      </div>
+
       <SectionLabel>Permissions</SectionLabel>
       <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Head trainer can edit billing</span>
@@ -871,10 +1009,11 @@ function Settings() {
 function MyBill() {
   const { user } = useApp();
   const { data: families } = useTable<Family>('families', q => q.eq('id', user?.family_id));
-  const { data: invoices } = useTable<Invoice>('invoices', q => q.eq('family_id', user?.family_id));
+  const { data: charges, reload: reloadC } = useTable<Charge>('charges', q => q.eq('family_id', user?.family_id));
+  const { data: payments, reload: reloadP } = useTable<Payment>('payments', q => q.eq('family_id', user?.family_id));
   const fam = families[0];
   if (!user?.family_id || !fam) return <Empty>No bill on file yet.</Empty>;
-  return <FamilyBill family={fam} invoice={invoices[0]} onBack={() => history.back()} canEdit={false} />;
+  return <FamilyBill family={fam} charges={charges} payments={payments} onBack={() => history.back()} canEdit={false} onChange={() => { reloadC(); reloadP(); }} />;
 }
 
 /* ---------------- Profile ---------------- */
