@@ -4,7 +4,7 @@ import { Card, SectionLabel, Pill, Button } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
-import { Lesson, Horse } from '../types';
+import { Lesson, Horse, Rider, AppUser } from '../types';
 import { useApp } from '../AppContext';
 import { Nav } from '../App';
 
@@ -20,6 +20,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
   const [view, setView] = useState<Date>(new Date(today.getFullYear(), today.getMonth(), 1));
   const [open, setOpen] = useState<Lesson | null>(null);
   const [req, setReq] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const { data: lessons, reload } = useTable<Lesson>('lessons', q => q.order('starts_at'));
 
@@ -87,7 +88,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
             <div style={{ width: 4, alignSelf: 'stretch', borderRadius: 4, background: lessonColor(l.lesson_type) }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{l.rider_name || 'Lesson'}{l.horse_name ? ` · ${l.horse_name}` : ''}</div>
-              <div style={{ fontSize: 11, color: C.muted2 }}>{l.time_label}</div>
+              <div style={{ fontSize: 11, color: C.muted2 }}>{l.time_label}{l.trainer_name ? ` · ${l.trainer_name}` : ''}</div>
             </div>
             <Pill color={lessonColor(l.lesson_type)}>{l.lesson_type}</Pill>
           </Card>
@@ -101,7 +102,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
 
       {isStaff && (
         <div style={{ marginTop: 16 }}>
-          <Button kind="soft" onClick={() => addLesson(sel, reload)}>+ Add a lesson on this day</Button>
+          <Button kind="soft" onClick={() => setAdding(true)}>+ Add a lesson on this day</Button>
         </div>
       )}
       {isClient && (
@@ -110,25 +111,127 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
         </div>
       )}
       {req && <RequestSheet onClose={() => setReq(false)} />}
+      {adding && <AddLessonSheet day={sel} onClose={() => setAdding(false)} onSaved={reload} />}
     </Page>
   );
 }
 
 const navBtn: React.CSSProperties = { background: '#fff', border: 'none', borderRadius: 10, width: 34, height: 34, fontSize: 18, color: C.navy };
 
-async function addLesson(day: Date, reload: () => void) {
-  const rider = prompt('Rider name?');
-  if (!rider) return;
-  const horse = prompt('Horse?') || '';
-  const timeLabel = prompt('Time (e.g. 4:00 PM)?') || '4:00 PM';
-  const type = (prompt('Type? Private / Semi-private / Group / Training', 'Private') || 'Private');
-  const { data: b } = await supabase.from('barns').select('id').limit(1).maybeSingle();
-  const starts = new Date(day); starts.setHours(16, 0, 0, 0);
-  await supabase.from('lessons').insert({
-    barn_id: b?.id, starts_at: starts.toISOString(), time_label: timeLabel,
-    rider_name: rider, horse_name: horse, lesson_type: type, status: 'booked',
-  });
-  reload();
+function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => void; onSaved: () => void }) {
+  const { barn } = useApp();
+  const { data: riders } = useTable<Rider>('riders', q => q.order('full_name'));
+  const { data: horses } = useTable<Horse>('horses', q => q.order('name'));
+  const { data: staff } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
+
+  const [riderName, setRiderName] = useState('');
+  const [familyId, setFamilyId] = useState<string | null>(null);
+  const [horse, setHorse] = useState('');
+  const [trainerId, setTrainerId] = useState('');
+  const [type, setType] = useState('Private');
+  const [time, setTime] = useState('4:00 PM');
+  const [fee, setFee] = useState('');
+  const [repeat, setRepeat] = useState(false);
+  const [weeks, setWeeks] = useState('12');
+  const [busy, setBusy] = useState(false);
+
+  const ready = riderName.trim().length > 0;
+  const dowName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getDay()];
+
+  function pickRider(id: string) {
+    const r = riders.find(x => x.id === id);
+    if (r) { setRiderName(r.full_name); setFamilyId(r.family_id); }
+  }
+
+  async function save() {
+    setBusy(true);
+    try {
+      const trainer = staff.find(s => s.id === trainerId);
+      const base: any = {
+        barn_id: barn?.id, rider_name: riderName.trim(), family_id: familyId,
+        horse_name: horse || null, lesson_type: type, time_label: time || null,
+        fee: Number(fee) || 0, trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
+        status: 'booked',
+      };
+      if (repeat) {
+        const { data: series } = await supabase.from('lesson_series').insert({
+          barn_id: barn?.id, rider_name: riderName.trim(), family_id: familyId, horse_name: horse || null,
+          trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
+          lesson_type: type, dow: day.getDay(), time_label: time || null, fee: Number(fee) || 0,
+        }).select('id').single();
+        const n = Math.min(Math.max(Number(weeks) || 12, 1), 52);
+        const rows = [];
+        for (let i = 0; i < n; i++) {
+          const d = new Date(day); d.setDate(d.getDate() + i * 7); d.setHours(12, 0, 0, 0);
+          rows.push({ ...base, starts_at: d.toISOString(), series_id: series?.id });
+        }
+        await supabase.from('lessons').insert(rows);
+      } else {
+        const d = new Date(day); d.setHours(12, 0, 0, 0);
+        await supabase.from('lessons').insert({ ...base, starts_at: d.toISOString() });
+      }
+      onSaved(); onClose();
+    } finally { setBusy(false); }
+  }
+
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', marginBottom: 10, fontFamily: 'inherit' };
+  const lbl: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, color: C.muted, margin: '2px 0 5px' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Add a lesson</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>{day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+
+        <div style={lbl}>Rider</div>
+        {riders.length > 0 && (
+          <select value="" onChange={e => pickRider(e.target.value)} style={inp}>
+            <option value="">Pick a rider…</option>
+            {riders.map(r => <option key={r.id} value={r.id}>{r.full_name}</option>)}
+          </select>
+        )}
+        <input style={inp} placeholder="Rider name" value={riderName} onChange={e => setRiderName(e.target.value)} />
+
+        <div style={lbl}>Horse</div>
+        <select value={horse} onChange={e => setHorse(e.target.value)} style={inp}>
+          <option value="">(none / decide later)</option>
+          {horses.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+        </select>
+
+        <div style={lbl}>Trainer</div>
+        <select value={trainerId} onChange={e => setTrainerId(e.target.value)} style={inp}>
+          <option value="">(unassigned)</option>
+          {staff.map(s => <option key={s.id} value={s.id}>{s.full_name || s.email}</option>)}
+        </select>
+
+        <div style={lbl}>Type</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 10 }}>
+          {['Private', 'Semi-private', 'Group', 'Training'].map(t => (
+            <button key={t} onClick={() => setType(t)} style={{ border: 'none', borderRadius: 10, padding: '10px 4px', fontSize: 12.5, fontWeight: 700, background: type === t ? C.navy : '#fff', color: type === t ? '#fff' : C.muted }}>{t}</button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}><div style={lbl}>Time</div><input style={inp} value={time} onChange={e => setTime(e.target.value)} placeholder="4:00 PM" /></div>
+          <div style={{ flex: 1 }}><div style={lbl}>Fee ($)</div><input style={inp} value={fee} onChange={e => setFee(e.target.value)} placeholder="0" inputMode="decimal" /></div>
+        </div>
+
+        <label style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '4px 2px 10px', cursor: 'pointer' }}>
+          <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} style={{ width: 20, height: 20 }} />
+          <span style={{ fontSize: 13, color: C.text }}>Repeat every <b>{dowName}</b> (standing weekly lesson)</span>
+        </label>
+        {repeat && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={lbl}>For how many weeks?</div>
+            <input style={inp} value={weeks} onChange={e => setWeeks(e.target.value)} inputMode="numeric" />
+          </div>
+        )}
+
+        <Button disabled={!ready || busy} onClick={save}>{busy ? 'Saving…' : repeat ? `Add weekly lesson` : 'Add lesson'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
+  );
 }
 
 function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }) {

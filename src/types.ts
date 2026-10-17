@@ -98,6 +98,11 @@ export interface Lesson {
   status: string;
   notes: string | null;
   family_id?: string | null;
+  trainer_id?: string | null;
+  trainer_name?: string | null;
+  fee?: number | null;
+  series_id?: string | null;
+  duration_min?: number | null;
 }
 
 export interface Invoice {
