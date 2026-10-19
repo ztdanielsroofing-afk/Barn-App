@@ -53,8 +53,9 @@ export default function AdminOverview({ nav }: { nav: Nav }) {
     flags.push({ title: 'Farrier / vet due soon', count: careDue.length, color: C.gold, bg: C.goldTint, go: () => nav.go('more', 'care'), detail: careDue.slice(0, 3).map(h => h.name).join(', ') });
   if (famMissingDocs.length)
     flags.push({ title: 'Families with unsigned documents', count: famMissingDocs.length, color: C.purple, bg: C.purpleBg, go: () => nav.go('more', 'documents') });
-  if (critical.length)
-    flags.push({ title: 'Horses with critical notes', count: critical.length, color: C.red, bg: C.redBg, go: () => nav.go('horses'), detail: critical.slice(0, 3).map(h => h.name).join(', ') });
+
+  // Flatten every critical note into one list: { horse, text }.
+  const critNotes = critical.flatMap(h => (h.critical_notes || []).map(n => ({ horse: h, text: n.text })));
 
   return (
     <div style={{ marginTop: -6 }}>
@@ -83,7 +84,24 @@ export default function AdminOverview({ nav }: { nav: Nav }) {
       )}
 
       <SectionLabel>Needs attention</SectionLabel>
-      {flags.length === 0 && <Card><div style={{ fontSize: 13, color: C.muted, textAlign: 'center', padding: 8 }}>Nothing flagged. Everything looks in order. 🐴</div></Card>}
+      {flags.length === 0 && critNotes.length === 0 && <Card><div style={{ fontSize: 13, color: C.muted, textAlign: 'center', padding: 8 }}>Nothing flagged. Everything looks in order. 🐴</div></Card>}
+
+      {critNotes.length > 0 && (
+        <Card onClick={() => nav.go('horses')} style={{ background: C.redBg, marginBottom: 9 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: C.red, letterSpacing: '0.05em' }}>⚠ CRITICAL HANDLING NOTES ({critNotes.length})</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {critNotes.map((n, i) => (
+              <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'baseline' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: C.red, flex: 'none' }}>{n.horse.name}</span>
+                <span style={{ fontSize: 12.5, color: C.text, lineHeight: 1.4 }}>{n.text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {flags.map((f, i) => (
           <Card key={i} onClick={f.go} style={{ background: f.bg, display: 'flex', alignItems: 'center', gap: 12 }}>

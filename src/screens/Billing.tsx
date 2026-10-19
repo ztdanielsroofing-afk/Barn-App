@@ -9,6 +9,11 @@ import { useApp } from '../AppContext';
 import { notify } from '../notify';
 import { Nav } from '../App';
 
+function ordinal(n: number) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 function balanceOf(familyId: string, charges: Charge[], payments: Payment[]) {
   const c = charges.filter(x => x.family_id === familyId).reduce((s, x) => s + Number(x.amount || 0), 0);
   const p = payments.filter(x => x.family_id === familyId).reduce((s, x) => s + Number(x.amount || 0), 0);
@@ -48,9 +53,10 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
     const monthLabel = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     let added = 0;
     for (const f of families) {
+      const dayNote = f.billing_day ? ` (due ${ordinal(f.billing_day)})` : '';
       const posts: { label: string; amount: number }[] = [];
-      if (Number(f.monthly_fee) > 0) posts.push({ label: `Monthly fee — ${monthLabel}`, amount: Number(f.monthly_fee) });
-      if (Number(f.board_fee) > 0) posts.push({ label: `Board — ${monthLabel}`, amount: Number(f.board_fee) });
+      if (Number(f.monthly_fee) > 0) posts.push({ label: `Monthly fee — ${monthLabel}${dayNote}`, amount: Number(f.monthly_fee) });
+      if (Number(f.board_fee) > 0) posts.push({ label: `Board — ${monthLabel}${dayNote}`, amount: Number(f.board_fee) });
       let any = false;
       for (const p of posts) {
         if (!charges.some(c => c.family_id === f.id && c.label === p.label)) {
@@ -105,6 +111,7 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
           if (Number(f.monthly_fee) > 0) bits.push(`${money(f.monthly_fee)}/mo`);
           if (Number(f.board_fee) > 0) bits.push(`board ${money(f.board_fee)}`);
           if (f.billing_mode === 'per_lesson') bits.push('per-lesson');
+          if ((Number(f.monthly_fee) > 0 || Number(f.board_fee) > 0) && f.billing_day) bits.push(`${ordinal(f.billing_day)}`);
           return (
             <Card key={f.id} onClick={() => setOpen(f)} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <Avatar init={f.family_name.slice(0, 1)} tint={C.navy} />
@@ -194,12 +201,27 @@ export function FamilyBill({ family, charges, payments, onBack, canEdit, onChang
               <input style={fInp} defaultValue={String(family.board_fee || '')} inputMode="decimal" placeholder="0" onBlur={e => setField({ board_fee: Number(e.target.value) || 0 })} />
             </div>
           </div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Charge day of month</div>
+            <select
+              style={{ ...fInp, appearance: 'none', background: '#fff' }}
+              defaultValue={String(family.billing_day || 1)}
+              onChange={e => setField({ billing_day: Number(e.target.value) })}
+            >
+              {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
+                <option key={d} value={d}>{ordinal(d)} of each month</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: C.muted2, marginTop: 5, lineHeight: 1.4 }}>
+              Monthly fee &amp; board for this family are charged on the {ordinal(family.billing_day || 1)}.
+            </div>
+          </div>
           <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Auto-charge each lesson's fee</span>
             <input type="checkbox" defaultChecked={family.billing_mode === 'per_lesson'} onChange={e => setField({ billing_mode: e.target.checked ? 'per_lesson' : 'manual' })} style={{ width: 20, height: 20 }} />
           </Card>
           <div style={{ fontSize: 11, color: C.muted2, marginTop: 6, lineHeight: 1.4 }}>
-            Monthly fee &amp; board post when you tap “Run billing for this month” on the Billing screen. Board is for families keeping a horse at the barn.
+            Monthly fee &amp; board post when you tap “Run billing for this month” on the Billing screen, dated to each family's charge day. Board is for families keeping a horse at the barn.
           </div>
         </>
       )}

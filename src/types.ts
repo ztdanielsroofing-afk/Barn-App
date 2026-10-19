@@ -59,6 +59,8 @@ export interface Family {
   billing_mode?: string | null;   // 'per_lesson' on = auto-charge lessons
   monthly_fee?: number | null;
   board_fee?: number | null;
+  billing_day?: number | null;     // day of month (1–28) monthly fee + board are charged
+
   created_at?: string;
 }
 
