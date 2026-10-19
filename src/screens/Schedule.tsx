@@ -274,12 +274,14 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
   const { data: horses } = useTable<Horse>('horses', q => q.order('name'));
   const [notes, setNotes] = useState(lesson.notes || '');
   const [work, setWork] = useState<string[]>(lesson.work_types || []);
+  const [horseName, setHorseName] = useState(lesson.horse_name || '');
   const [saved, setSaved] = useState(false);
   const toggleWork = (w: string) => setWork(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
 
   async function changeHorse(name: string) {
-    await supabase.from('lessons').update({ horse_name: name }).eq('id', lesson.id);
-    onBack();
+    const next = horseName === name ? '' : name;  // tap again to unassign
+    setHorseName(next);
+    await supabase.from('lessons').update({ horse_name: next || null }).eq('id', lesson.id);
   }
   async function saveNotes() {
     await supabase.from('lessons').update({ notes, work_types: work, status: 'completed' }).eq('id', lesson.id);
@@ -317,21 +319,25 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
         {riderNames(lesson).map((n, i) => (
           <div key={i} style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{n}</div>
         ))}
-        <div style={{ fontSize: 12, color: C.muted2, marginTop: 8 }}>Horse: {lesson.horse_name || '—'}{lesson.trainer_name ? ` · Trainer: ${lesson.trainer_name}` : ''}</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginTop: 8 }}>Horse: {horseName || '—'}{lesson.trainer_name ? ` · Trainer: ${lesson.trainer_name}` : ''}</div>
       </Card>
 
       {isStaff && (
         <>
           <div style={{ marginTop: 12 }}><Button kind="soft" onClick={addRider}>+ Add another rider (group)</Button></div>
-          <SectionLabel>Assign horse</SectionLabel>
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {horses.map(h => (
-              <button key={h.id} onClick={() => changeHorse(h.name)} style={{
-                border: 'none', borderRadius: 18, padding: '8px 12px', fontSize: 12, fontWeight: 700,
-                background: lesson.horse_name === h.name ? C.navy : '#fff', color: lesson.horse_name === h.name ? '#fff' : C.navy,
-              }}>{h.name}</button>
-            ))}
-          </div>
+          <SectionLabel>Assign horse {horseName ? `· ${horseName}` : ''}</SectionLabel>
+          {horses.length === 0
+            ? <div style={{ fontSize: 12.5, color: C.muted2 }}>No horses in the barn yet — add them under the Horses tab.</div>
+            : (
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                {horses.map(h => (
+                  <button key={h.id} onClick={() => changeHorse(h.name)} style={{
+                    border: 'none', borderRadius: 18, padding: '8px 12px', fontSize: 12, fontWeight: 700,
+                    background: horseName === h.name ? C.navy : '#fff', color: horseName === h.name ? '#fff' : C.navy,
+                  }}>{h.name}</button>
+                ))}
+              </div>
+            )}
 
           <SectionLabel>What did you work on?</SectionLabel>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 10 }}>
