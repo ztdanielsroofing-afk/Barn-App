@@ -4,7 +4,7 @@ import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
-import { Horse } from '../types';
+import { Horse, TrainingSession } from '../types';
 import { useApp } from '../AppContext';
 import { Nav } from '../App';
 
@@ -169,6 +169,8 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
         </Card>
       )}
 
+      <TrainingLog horse={horse} canEdit={canEdit} />
+
       {canEdit && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 14 }}>
           <Button kind="soft" onClick={flagCritical}>⚠ Flag a critical handling note</Button>
@@ -176,5 +178,95 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
         </div>
       )}
     </Page>
+  );
+}
+
+const TRAIN_WORK = ['Groundwork', 'Flat work', 'Jumping', 'Lunging', 'Dressage', 'Trail', 'Other'];
+
+function TrainingLog({ horse, canEdit }: { horse: Horse; canEdit: boolean }) {
+  const { barn, user } = useApp();
+  const { data: sessions, reload } = useTable<TrainingSession>('training_sessions', q => q.eq('horse_id', horse.id).order('date', { ascending: false }));
+  const [adding, setAdding] = useState(false);
+
+  const countFor = (w: string) => sessions.filter(s => (s.work_types || []).includes(w)).length;
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 9px' }}>
+        <SectionLabel style={{ margin: 0 }}>Training log</SectionLabel>
+        {canEdit && <button onClick={() => setAdding(true)} style={{ background: C.goldTint, color: C.navy, border: 'none', borderRadius: 20, padding: '7px 13px', fontSize: 11.5, fontWeight: 800 }}>+ Log training</button>}
+      </div>
+
+      {sessions.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          {['Groundwork', 'Flat work', 'Jumping'].map(w => (
+            <div key={w} style={{ flex: 1, background: '#fff', borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+              <div style={{ fontFamily: serif, fontSize: 20, color: C.navy }}>{countFor(w)}</div>
+              <div style={{ fontSize: 10, color: C.muted2 }}>{w}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {sessions.map(s => (
+          <Card key={s.id}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{s.date ? new Date(s.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</div>
+              {s.trainer_name && <div style={{ fontSize: 11, color: C.muted2 }}>{s.trainer_name}</div>}
+            </div>
+            {(s.work_types || []).length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
+                {(s.work_types || []).map(w => <Pill key={w} color={C.navy} bg={C.infoBg}>{w}</Pill>)}
+              </div>
+            )}
+            {s.notes && <div style={{ fontSize: 12.5, color: C.text, marginTop: 7, lineHeight: 1.5 }}>{s.notes}</div>}
+            {canEdit && <button onClick={async () => { if (confirm('Delete this training entry?')) { await supabase.from('training_sessions').delete().eq('id', s.id); reload(); } }} style={{ background: C.redBg, color: C.red, border: 'none', borderRadius: 9, padding: '5px 10px', fontSize: 11, fontWeight: 700, marginTop: 8 }}>Delete</button>}
+          </Card>
+        ))}
+        {sessions.length === 0 && <Empty>No training logged yet.{canEdit ? ' Tap “+ Log training”.' : ''}</Empty>}
+      </div>
+
+      {adding && <LogTrainingModal horse={horse} barnId={barn?.id} trainerName={user?.full_name || null} trainerId={user?.id || null} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} />}
+    </>
+  );
+}
+
+function LogTrainingModal({ horse, barnId, trainerName, trainerId, onClose, onSaved }:
+  { horse: Horse; barnId?: string; trainerName: string | null; trainerId: string | null; onClose: () => void; onSaved: () => void }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [work, setWork] = useState<string[]>([]);
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toggle = (w: string) => setWork(p => p.includes(w) ? p.filter(x => x !== w) : [...p, w]);
+
+  async function save() {
+    setBusy(true);
+    await supabase.from('training_sessions').insert({
+      barn_id: barnId, horse_id: horse.id, trainer_id: trainerId, trainer_name: trainerName,
+      date, work_types: work, notes: notes.trim() || null,
+    });
+    setBusy(false); onSaved();
+  }
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', marginBottom: 10, fontFamily: 'inherit' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Log training — {horse.name}</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>Record what you worked on; the owner can see it.</div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Date</div>
+        <input type="date" style={inp} value={date} onChange={e => setDate(e.target.value)} />
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 6 }}>Worked on</div>
+        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 12 }}>
+          {TRAIN_WORK.map(w => (
+            <button key={w} onClick={() => toggle(w)} style={{ border: 'none', borderRadius: 18, padding: '8px 12px', fontSize: 12, fontWeight: 700, background: work.includes(w) ? C.navy : '#fff', color: work.includes(w) ? '#fff' : C.muted }}>{w}</button>
+          ))}
+        </div>
+        <textarea style={{ ...inp, minHeight: 80 }} placeholder="Notes on the ride / progress (optional)" value={notes} onChange={e => setNotes(e.target.value)} />
+        <Button disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save training entry'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }

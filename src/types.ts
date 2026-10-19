@@ -134,6 +134,19 @@ export interface Lesson {
   series_id?: string | null;
   duration_min?: number | null;
   participants?: { name: string; family_id: string | null }[] | null;
+  work_types?: string[] | null;
+}
+
+export interface TrainingSession {
+  id: string;
+  barn_id: string;
+  horse_id: string;
+  trainer_id: string | null;
+  trainer_name: string | null;
+  date: string | null;
+  work_types: string[] | null;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface Invoice {

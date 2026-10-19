@@ -10,6 +10,7 @@ import { FamilyBill } from './Billing';
 import AdminOverview from './AdminOverview';
 import { sendInvite } from '../invites';
 import { notify } from '../notify';
+import { getHomePrefs, setHomePrefs, HOME_MODULES, Timeframe } from '../prefs';
 import { Role } from '../types';
 
 export default function More({ nav, section }: { nav: Nav; section: string | null; params?: any }) {
@@ -125,7 +126,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 18
+        Signed in as {user?.email} · {role} · build 19
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -1077,6 +1078,9 @@ function MyBill() {
 /* ---------------- Profile ---------------- */
 function Profile() {
   const { user, role, refresh } = useApp();
+  const [prefs, setPrefs] = useState(getHomePrefs());
+  function save(p: typeof prefs) { setPrefs(p); setHomePrefs(p); }
+
   async function editName() {
     const name = prompt('Your name?', user?.full_name || ''); if (!name) return;
     await supabase.from('users').update({ full_name: name }).eq('id', user!.id);
@@ -1091,6 +1095,30 @@ function Profile() {
         <Row l="Role" v={<span style={{ textTransform: 'capitalize' }}>{(role || '').replace('_', ' ')}</span>} last />
       </Card>
       <div style={{ marginTop: 14 }}><Button kind="ghost" onClick={editName}>Edit my name</Button></div>
+
+      <SectionLabel>Home page — default timeframe</SectionLabel>
+      <div style={{ display: 'flex', gap: 7 }}>
+        {(['day', 'week', 'month'] as Timeframe[]).map(tf => (
+          <button key={tf} onClick={() => save({ ...prefs, timeframe: tf })} style={{
+            flex: 1, border: 'none', borderRadius: 10, padding: '10px 4px', fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize',
+            background: prefs.timeframe === tf ? C.navy : '#fff', color: prefs.timeframe === tf ? '#fff' : C.muted,
+          }}>{tf}</button>
+        ))}
+      </div>
+
+      <SectionLabel>Home page — show these</SectionLabel>
+      <Card style={{ padding: 4 }}>
+        {HOME_MODULES.map((m, i) => {
+          const on = prefs.modules[m.key] !== false;
+          return (
+            <div key={m.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 12px', borderBottom: i < HOME_MODULES.length - 1 ? `1px solid rgba(40,58,109,0.06)` : 'none' }}>
+              <span style={{ fontSize: 13, color: C.text }}>{m.label}</span>
+              <input type="checkbox" checked={on} onChange={() => save({ ...prefs, modules: { ...prefs.modules, [m.key]: !on } })} style={{ width: 20, height: 20 }} />
+            </div>
+          );
+        })}
+      </Card>
+      <div style={{ fontSize: 11, color: C.muted2, marginTop: 8 }}>These home-screen settings apply to this device.</div>
     </>
   );
 }

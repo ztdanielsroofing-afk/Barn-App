@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { C, serif, money } from '../theme';
 import { Card, SectionLabel, Pill } from '../ui';
 import { BrandHeader } from './Header';
@@ -6,11 +6,14 @@ import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
 import { notify } from '../notify';
+import { getHomePrefs, setHomePrefs, moduleOn, Timeframe } from '../prefs';
 import { Nav } from '../App';
 import { Lesson, Horse, Charge, Payment, Family, ArenaBooking } from '../types';
 
 export default function Home({ nav }: { nav: Nav }) {
   const { user, barn, isClient, isStaff, canViewBilling } = useApp();
+  const [prefs, setPrefs] = useState(getHomePrefs());
+  const setTf = (tf: Timeframe) => { const p = { ...prefs, timeframe: tf }; setPrefs(p); setHomePrefs(p); };
   const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
   const { data: horses } = useTable<Horse>('horses', q => q.order('farrier_next'));
   const { data: charges } = useTable<Charge>('charges');
@@ -26,9 +29,19 @@ export default function Home({ nav }: { nav: Nav }) {
   }
 
   const todayKey = new Date().toISOString().slice(0, 10);
+  const endKey = useMemo(() => {
+    const d = new Date();
+    if (prefs.timeframe === 'week') d.setDate(d.getDate() + 7);
+    else if (prefs.timeframe === 'month') d.setMonth(d.getMonth() + 1);
+    return d.toISOString().slice(0, 10);
+  }, [prefs.timeframe]);
   const upcoming = useMemo(
-    () => lessons.filter(l => l.starts_at.slice(0, 10) >= todayKey).slice(0, 4),
-    [lessons, todayKey]
+    () => lessons.filter(l => {
+      const k = l.starts_at.slice(0, 10);
+      if (k < todayKey) return false;
+      return prefs.timeframe === 'day' ? k === todayKey : k <= endKey;
+    }).slice(0, 20),
+    [lessons, todayKey, endKey, prefs.timeframe]
   );
 
   const careDue = horses.filter(h => h.care_level === 'soon' || h.care_level === 'overdue');
@@ -60,7 +73,7 @@ export default function Home({ nav }: { nav: Nav }) {
         </div>
 
         {/* Persistent "action needed" alert for staff — stays until they respond */}
-        {isStaff && (arenaReq.length + schedReq.length) > 0 && (
+        {isStaff && moduleOn(prefs, 'requests') && (arenaReq.length + schedReq.length) > 0 && (
           <div style={{ marginTop: 10, background: C.redBg, border: `1px solid ${C.red}44`, borderRadius: 16, padding: 14 }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: C.red, letterSpacing: '0.03em', marginBottom: 10 }}>
               ⚠ NEEDS YOUR RESPONSE ({arenaReq.length + schedReq.length})
@@ -89,7 +102,7 @@ export default function Home({ nav }: { nav: Nav }) {
           </div>
         )}
 
-        {isClient && myBalance > 0 && (
+        {isClient && moduleOn(prefs, 'balance') && myBalance > 0 && (
           <>
             <SectionLabel>Your balance</SectionLabel>
             <Card onClick={() => nav.go('more', 'mybill')} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -102,7 +115,7 @@ export default function Home({ nav }: { nav: Nav }) {
           </>
         )}
 
-        {isStaff && (careDue.length > 0 || (canViewBilling && overdue.length > 0)) && (
+        {isStaff && moduleOn(prefs, 'attention') && (careDue.length > 0 || (canViewBilling && overdue.length > 0)) && (
           <>
             <SectionLabel>Needs your attention</SectionLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -122,7 +135,18 @@ export default function Home({ nav }: { nav: Nav }) {
           </>
         )}
 
-        <SectionLabel>Upcoming</SectionLabel>
+        {moduleOn(prefs, 'upcoming') && (<>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 9px' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: C.faint, textTransform: 'uppercase' }}>Upcoming</span>
+          <div style={{ display: 'flex', gap: 4, background: '#fff', borderRadius: 20, padding: 3 }}>
+            {(['day', 'week', 'month'] as Timeframe[]).map(tf => (
+              <button key={tf} onClick={() => setTf(tf)} style={{
+                border: 'none', borderRadius: 18, padding: '5px 11px', fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                background: prefs.timeframe === tf ? C.navy : 'transparent', color: prefs.timeframe === tf ? '#fff' : C.muted,
+              }}>{tf}</button>
+            ))}
+          </div>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {upcoming.map(l => (
             <Card key={l.id} onClick={() => nav.go('calendar')} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -137,10 +161,11 @@ export default function Home({ nav }: { nav: Nav }) {
           ))}
           {upcoming.length === 0 && (
             <div style={{ textAlign: 'center', color: C.muted2, fontSize: 13, padding: '18px 12px', background: 'rgba(255,255,255,0.5)', borderRadius: 14 }}>
-              Nothing scheduled yet.
+              Nothing scheduled {prefs.timeframe === 'day' ? 'today' : prefs.timeframe === 'week' ? 'this week' : 'this month'}.
             </div>
           )}
         </div>
+        </>)}
       </div>
     </div>
   );

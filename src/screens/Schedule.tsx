@@ -19,6 +19,7 @@ const riderTitle = (l: Lesson): string => {
   const ns = riderNames(l);
   return ns.length > 1 ? `${ns.length} riders · ${ns.join(', ')}` : (ns[0] || 'Lesson');
 };
+const WORK_TYPES = ['Flat work', 'Jumping', 'Groundwork', 'Dressage', 'Lunging', 'Trail', 'Other'];
 
 export default function Schedule({ nav: _nav }: { nav: Nav }) {
   const { isStaff, isClient } = useApp();
@@ -272,14 +273,16 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
   const { isStaff } = useApp();
   const { data: horses } = useTable<Horse>('horses', q => q.order('name'));
   const [notes, setNotes] = useState(lesson.notes || '');
+  const [work, setWork] = useState<string[]>(lesson.work_types || []);
   const [saved, setSaved] = useState(false);
+  const toggleWork = (w: string) => setWork(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
 
   async function changeHorse(name: string) {
     await supabase.from('lessons').update({ horse_name: name }).eq('id', lesson.id);
     onBack();
   }
   async function saveNotes() {
-    await supabase.from('lessons').update({ notes, status: 'completed' }).eq('id', lesson.id);
+    await supabase.from('lessons').update({ notes, work_types: work, status: 'completed' }).eq('id', lesson.id);
     await autoChargeLesson(lesson);
     setSaved(true);
   }
@@ -330,19 +333,34 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
             ))}
           </div>
 
-          <SectionLabel>Lesson notes</SectionLabel>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="What did you work on?" style={{
-            width: '100%', minHeight: 90, border: `1px solid ${C.page}`, borderRadius: 12, padding: 12,
+          <SectionLabel>What did you work on?</SectionLabel>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 10 }}>
+            {WORK_TYPES.map(w => (
+              <button key={w} onClick={() => toggleWork(w)} style={{
+                border: 'none', borderRadius: 18, padding: '8px 12px', fontSize: 12, fontWeight: 700,
+                background: work.includes(w) ? C.navy : '#fff', color: work.includes(w) ? '#fff' : C.muted,
+              }}>{w}</button>
+            ))}
+          </div>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional) — progress, homework, anything to remember" style={{
+            width: '100%', minHeight: 80, border: `1px solid ${C.page}`, borderRadius: 12, padding: 12,
             fontSize: 14, fontFamily: 'inherit', outline: 'none',
           }} />
-          <Button onClick={saveNotes} style={{ marginTop: 10 }}>{saved ? 'Saved ✓' : 'Save notes'}</Button>
+          <Button onClick={saveNotes} style={{ marginTop: 10 }}>{saved ? 'Saved ✓' : 'Save & mark complete'}</Button>
           <Button kind="ghost" onClick={del} style={{ marginTop: 10, color: C.red }}>Delete lesson</Button>
         </>
       )}
-      {!isStaff && lesson.notes && (
+      {!isStaff && ((lesson.work_types && lesson.work_types.length) || lesson.notes) && (
         <>
-          <SectionLabel>Notes from your trainer</SectionLabel>
-          <Card><div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{lesson.notes}</div></Card>
+          <SectionLabel>From your trainer</SectionLabel>
+          <Card>
+            {lesson.work_types && lesson.work_types.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: lesson.notes ? 10 : 0 }}>
+                {lesson.work_types.map(w => <Pill key={w} color={C.navy} bg={C.infoBg}>{w}</Pill>)}
+              </div>
+            )}
+            {lesson.notes && <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{lesson.notes}</div>}
+          </Card>
         </>
       )}
     </Page>
