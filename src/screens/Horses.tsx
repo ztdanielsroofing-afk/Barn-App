@@ -4,7 +4,7 @@ import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
-import { Horse, TrainingSession } from '../types';
+import { Horse, TrainingSession, Vaccine, CriticalNote } from '../types';
 import { useApp } from '../AppContext';
 import { Nav } from '../App';
 
@@ -59,29 +59,12 @@ export default function Horses({ params }: { nav: Nav; params?: any }) {
 
 function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => void; canEdit: boolean }) {
   const [tab, setTab] = useState<'overview' | 'care' | 'emergency'>('overview');
+  const [editing, setEditing] = useState(false);
   const crit = horse.critical_notes || [];
 
-  async function edit(field: keyof Horse, promptLabel: string) {
-    const val = prompt(promptLabel, (horse[field] as any) ?? '');
-    if (val === null) return;
-    await supabase.from('horses').update({ [field]: val }).eq('id', horse.id);
-    onBack();
-  }
-  async function flagCritical() {
-    const text = prompt('Critical handling note (shows in red to everyone):');
-    if (!text) return;
-    const next = [...crit, { text, by: 'Barn' }];
-    await supabase.from('horses').update({ critical_notes: next }).eq('id', horse.id);
-    onBack();
-  }
-  async function clearCritical(i: number) {
-    if (!confirm('Remove this critical note?')) return;
-    const next = crit.filter((_, j) => j !== i);
-    await supabase.from('horses').update({ critical_notes: next }).eq('id', horse.id);
-    onBack();
-  }
   async function del() {
-    if (!confirm(`Delete ${horse.name}?`)) return;
+    if (!confirm(`Delete ${horse.name}? This cannot be undone.`)) return;
+    if (!confirm(`Really delete ${horse.name}?`)) return;
     await supabase.from('horses').delete().eq('id', horse.id);
     onBack();
   }
@@ -95,7 +78,12 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
 
   return (
     <Page>
-      <button onClick={onBack} style={{ background: '#fff', border: 'none', borderRadius: 11, padding: '8px 13px', fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 12 }}>‹ Horses</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <button onClick={onBack} style={{ background: '#fff', border: 'none', borderRadius: 11, padding: '8px 13px', fontSize: 12, fontWeight: 700, color: C.navy }}>‹ Horses</button>
+        {canEdit && (
+          <button onClick={() => setEditing(true)} style={{ background: C.navy, border: 'none', borderRadius: 11, padding: '8px 16px', fontSize: 12.5, fontWeight: 800, color: '#fff' }}>Edit</button>
+        )}
+      </div>
       <div style={{ display: 'flex', gap: 13, alignItems: 'center', marginBottom: 14 }}>
         <Avatar init={horse.name.slice(0, 1)} tint={horse.tint || C.navy} />
         <div>
@@ -107,7 +95,7 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
       {crit.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
           {crit.map((n, i) => (
-            <div key={i} onClick={() => canEdit && clearCritical(i)} style={{ background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 12, padding: '11px 13px' }}>
+            <div key={i} style={{ background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 12, padding: '11px 13px' }}>
               <div style={{ fontSize: 10, fontWeight: 800, color: C.red, letterSpacing: '0.05em' }}>⚠ CRITICAL</div>
               <div style={{ fontSize: 13, color: C.text, marginTop: 2 }}>{n.text}</div>
             </div>
@@ -126,13 +114,6 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
           <Row l="Breed" v={horse.breed || '—'} />
           <Row l="Age" v={horse.age || '—'} />
           <Row l="Ownership" v={horse.barn_owned ? 'Barn owned' : (horse.owner_name || 'Boarder')} last />
-          {canEdit && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-              <Button kind="ghost" onClick={() => edit('breed', 'Breed?')}>Edit breed</Button>
-              <Button kind="ghost" onClick={() => edit('age', 'Age?')}>Edit age</Button>
-              <Button kind="ghost" onClick={() => edit('owner_name', 'Owner name (for boarders)?')}>Edit owner</Button>
-            </div>
-          )}
         </Card>
       )}
 
@@ -145,12 +126,6 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
           {(horse.vaccines || []).map((v, i, a) => (
             <Row key={i} l={v.name} v={v.due} last={i === a.length - 1} />
           ))}
-          {canEdit && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-              <Button kind="ghost" onClick={() => edit('farrier_next', 'Next farrier date?')}>Edit next farrier</Button>
-              <Button kind="ghost" onClick={() => edit('feeding', 'Feeding notes?')}>Edit feeding</Button>
-            </div>
-          )}
         </Card>
       )}
 
@@ -160,26 +135,155 @@ function HorseDetail({ horse, onBack, canEdit }: { horse: Horse; onBack: () => v
           <Row l="Owner phone" v={horse.em_owner_phone || '—'} />
           <Row l="Medical" v={horse.em_medical || '—'} />
           <Row l="Handling" v={horse.em_handling || '—'} last />
-          {canEdit && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-              <Button kind="ghost" onClick={() => edit('em_medical', 'Medical notes?')}>Edit medical</Button>
-              <Button kind="ghost" onClick={() => edit('em_handling', 'Handling notes?')}>Edit handling</Button>
-            </div>
-          )}
         </Card>
       )}
 
       <TrainingLog horse={horse} canEdit={canEdit} />
 
       {canEdit && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 14 }}>
-          <Button kind="soft" onClick={flagCritical}>⚠ Flag a critical handling note</Button>
+        <div style={{ marginTop: 14 }}>
           <Button kind="ghost" onClick={del} style={{ color: C.red }}>Delete horse</Button>
         </div>
       )}
+
+      {editing && <EditHorseModal horse={horse} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onBack(); }} />}
     </Page>
   );
 }
+
+const TINTS = ['#283a6d', '#c9a14a', '#4b7d57', '#b5532e', '#6a5a8a', '#7a3b2e', '#2e6b7a', '#8a3b5a'];
+
+function EditHorseModal({ horse, onClose, onSaved }: { horse: Horse; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(horse.name || '');
+  const [breed, setBreed] = useState(horse.breed || '');
+  const [age, setAge] = useState(horse.age || '');
+  const [barnOwned, setBarnOwned] = useState(!!horse.barn_owned);
+  const [ownerName, setOwnerName] = useState(horse.owner_name || '');
+  const [farrierLast, setFarrierLast] = useState(horse.farrier_last || '');
+  const [farrierNext, setFarrierNext] = useState(horse.farrier_next || '');
+  const [farrierInterval, setFarrierInterval] = useState(horse.farrier_interval || '');
+  const [feeding, setFeeding] = useState(horse.feeding || '');
+  const [emVet, setEmVet] = useState(horse.em_vet || '');
+  const [emOwnerPhone, setEmOwnerPhone] = useState(horse.em_owner_phone || '');
+  const [emMedical, setEmMedical] = useState(horse.em_medical || '');
+  const [emHandling, setEmHandling] = useState(horse.em_handling || '');
+  const [tint, setTint] = useState(horse.tint || C.navy);
+  const [vaccines, setVaccines] = useState<Vaccine[]>(horse.vaccines || []);
+  const [crit, setCrit] = useState<CriticalNote[]>(horse.critical_notes || []);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!name.trim()) { alert('Name is required.'); return; }
+    setBusy(true);
+    await supabase.from('horses').update({
+      name: name.trim(),
+      breed: breed.trim() || null,
+      age: age.trim() || null,
+      barn_owned: barnOwned,
+      owner_name: barnOwned ? null : (ownerName.trim() || null),
+      farrier_last: farrierLast.trim() || null,
+      farrier_next: farrierNext.trim() || null,
+      farrier_interval: farrierInterval.trim() || null,
+      feeding: feeding.trim() || null,
+      em_vet: emVet.trim() || null,
+      em_owner_phone: emOwnerPhone.trim() || null,
+      em_medical: emMedical.trim() || null,
+      em_handling: emHandling.trim() || null,
+      tint,
+      vaccines: vaccines.filter(v => v.name.trim()),
+      critical_notes: crit.filter(n => n.text.trim()),
+    }).eq('id', horse.id);
+    setBusy(false);
+    onSaved();
+  }
+
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' };
+  const lbl: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, color: C.muted, margin: '12px 0 5px' };
+  const head: React.CSSProperties = { fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', color: C.faint, textTransform: 'uppercase', margin: '20px 0 2px' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Edit {horse.name}</div>
+        <div style={{ fontSize: 12, color: C.muted2 }}>Change any detail below, then save once.</div>
+
+        <div style={head}>Basics</div>
+        <div style={lbl}>Name</div>
+        <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="Horse name" />
+        <div style={lbl}>Breed</div>
+        <input style={inp} value={breed} onChange={e => setBreed(e.target.value)} placeholder="e.g. Quarter Horse" />
+        <div style={lbl}>Age</div>
+        <input style={inp} value={age} onChange={e => setAge(e.target.value)} placeholder="e.g. 18 yrs" />
+        <div style={lbl}>Ownership</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setBarnOwned(true)} style={seg(barnOwned)}>Barn owned</button>
+          <button onClick={() => setBarnOwned(false)} style={seg(!barnOwned)}>Boarder</button>
+        </div>
+        {!barnOwned && (<>
+          <div style={lbl}>Owner name</div>
+          <input style={inp} value={ownerName} onChange={e => setOwnerName(e.target.value)} placeholder="Boarder / owner name" />
+        </>)}
+        <div style={lbl}>Color tag</div>
+        <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+          {TINTS.map(t => (
+            <button key={t} onClick={() => setTint(t)} style={{ width: 34, height: 34, borderRadius: '50%', background: t, border: tint === t ? '3px solid ' + C.navy : '3px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,0.08)' }} />
+          ))}
+        </div>
+
+        <div style={head}>Care</div>
+        <div style={lbl}>Farrier — last</div>
+        <input style={inp} value={farrierLast} onChange={e => setFarrierLast(e.target.value)} placeholder="e.g. Sept 10" />
+        <div style={lbl}>Farrier — next</div>
+        <input style={inp} value={farrierNext} onChange={e => setFarrierNext(e.target.value)} placeholder="e.g. Nov 5" />
+        <div style={lbl}>Farrier — interval</div>
+        <input style={inp} value={farrierInterval} onChange={e => setFarrierInterval(e.target.value)} placeholder="e.g. 6–8 weeks" />
+        <div style={lbl}>Feeding notes</div>
+        <textarea style={{ ...inp, minHeight: 64 }} value={feeding} onChange={e => setFeeding(e.target.value)} placeholder="Feed / supplements / schedule" />
+
+        <div style={lbl}>Vaccines / vet</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {vaccines.map((v, i) => (
+            <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+              <input style={{ ...inp, flex: 1 }} value={v.name} placeholder="Name (e.g. Shots)" onChange={e => setVaccines(vaccines.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
+              <input style={{ ...inp, flex: 1 }} value={v.due} placeholder="Due (e.g. April)" onChange={e => setVaccines(vaccines.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} />
+              <button onClick={() => setVaccines(vaccines.filter((_, j) => j !== i))} style={{ background: C.redBg, color: C.red, border: 'none', borderRadius: 9, width: 34, height: 40, fontSize: 18, fontWeight: 700, flex: 'none' }}>×</button>
+            </div>
+          ))}
+          <button onClick={() => setVaccines([...vaccines, { name: '', due: '' }])} style={{ background: '#fff', color: C.navy, border: `1px dashed ${C.faint}`, borderRadius: 12, padding: '10px', fontSize: 12.5, fontWeight: 700 }}>+ Add vaccine / vet item</button>
+        </div>
+
+        <div style={head}>Emergency</div>
+        <div style={lbl}>Vet</div>
+        <input style={inp} value={emVet} onChange={e => setEmVet(e.target.value)} placeholder="Vet name / clinic" />
+        <div style={lbl}>Owner phone</div>
+        <input style={inp} value={emOwnerPhone} onChange={e => setEmOwnerPhone(e.target.value)} placeholder="Emergency contact phone" />
+        <div style={lbl}>Medical notes</div>
+        <textarea style={{ ...inp, minHeight: 56 }} value={emMedical} onChange={e => setEmMedical(e.target.value)} placeholder="Allergies, conditions, meds" />
+        <div style={lbl}>Handling notes</div>
+        <textarea style={{ ...inp, minHeight: 56 }} value={emHandling} onChange={e => setEmHandling(e.target.value)} placeholder="How to safely handle" />
+
+        <div style={head}>⚠ Critical handling notes</div>
+        <div style={{ fontSize: 11.5, color: C.muted2, marginBottom: 6 }}>These show in red to everyone.</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {crit.map((n, i) => (
+            <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+              <input style={{ ...inp, flex: 1 }} value={n.text} placeholder="e.g. ONLY cross-ties" onChange={e => setCrit(crit.map((x, j) => j === i ? { ...x, text: e.target.value } : x))} />
+              <button onClick={() => setCrit(crit.filter((_, j) => j !== i))} style={{ background: C.redBg, color: C.red, border: 'none', borderRadius: 9, width: 34, height: 40, fontSize: 18, fontWeight: 700, flex: 'none' }}>×</button>
+            </div>
+          ))}
+          <button onClick={() => setCrit([...crit, { text: '', by: 'Barn' }])} style={{ background: '#fff', color: C.red, border: `1px dashed ${C.red}66`, borderRadius: 12, padding: '10px', fontSize: 12.5, fontWeight: 700 }}>+ Add critical note</button>
+        </div>
+
+        <div style={{ marginTop: 22 }}>
+          <Button disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save all changes'}</Button>
+          <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const seg = (on: boolean): React.CSSProperties => ({ flex: 1, border: 'none', borderRadius: 12, padding: '11px 4px', fontSize: 13, fontWeight: 700, background: on ? C.navy : '#fff', color: on ? '#fff' : C.muted });
 
 const TRAIN_WORK = ['Groundwork', 'Flat work', 'Jumping', 'Lunging', 'Dressage', 'Trail', 'Other'];
 
