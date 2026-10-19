@@ -14,3 +14,4 @@ fix-invites.sql
 reset-test-client.sql
 *.tsbuildinfo
 run-all-latest-migrations.sql
+consolidate-barn.sql
