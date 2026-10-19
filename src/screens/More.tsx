@@ -5,7 +5,7 @@ import { supabase } from '../supabase';
 import { useApp } from '../AppContext';
 import { useTable } from '../db';
 import { Nav } from '../App';
-import { Family, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature, Charge, Payment, Lesson, AppNotification } from '../types';
+import { Family, Rider, AppUser, TaskRow, Show, Listing, BarnDocument, Signature, Charge, Payment, Lesson, AppNotification, Payout } from '../types';
 import { FamilyBill } from './Billing';
 import AdminOverview from './AdminOverview';
 import { sendInvite } from '../invites';
@@ -126,7 +126,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 23
+        Signed in as {user?.email} · {role} · build 24
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -714,7 +714,9 @@ function Pay() {
   const { canViewBilling, user } = useApp();
   const { data: staff, reload } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
   const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
+  const { data: payouts, reload: reloadPayouts } = useTable<Payout>('payouts', q => q.order('created_at', { ascending: false }));
   const [edit, setEdit] = useState<AppUser | null>(null);
+  const [payout, setPayout] = useState<AppUser | null>(null);
 
   const now = new Date();
   const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0, 0, 0, 0);
@@ -723,11 +725,16 @@ function Pay() {
 
   const shown = canViewBilling ? staff : staff.filter(s => s.id === user?.id);
 
-  // Pay for a trainer over lessons on/after `from`.
-  const payIn = (t: AppUser, from: Date) =>
-    payFor(t, lessons.filter(l => l.trainer_id === t.id && new Date(l.starts_at) >= from));
-  const countIn = (t: AppUser, from: Date) =>
-    lessons.filter(l => l.trainer_id === t.id && new Date(l.starts_at) >= from).length;
+  // A lesson is "earned" once it has happened: marked completed, or its start time has passed.
+  const earnedLessons = (t: AppUser, from: Date) =>
+    lessons.filter(l => l.trainer_id === t.id
+      && new Date(l.starts_at) >= from
+      && (l.status === 'completed' || new Date(l.starts_at) <= now));
+  const payIn = (t: AppUser, from: Date) => payFor(t, earnedLessons(t, from));
+  const countIn = (t: AppUser, from: Date) => earnedLessons(t, from).length;
+  // Total earned all-time vs paid out all-time → still owed.
+  const earnedAll = (t: AppUser) => payFor(t, earnedLessons(t, new Date(2000, 0, 1)));
+  const paidAll = (t: AppUser) => payouts.filter(p => p.trainer_id === t.id).reduce((s, p) => s + Number(p.amount || 0), 0);
 
   return (
     <>
@@ -741,6 +748,9 @@ function Pay() {
             { l: 'This month', from: monthStart },
             { l: 'This year', from: yearStart },
           ];
+          const earned = earnedAll(t);
+          const paid = paidAll(t);
+          const owed = earned - paid;
           return (
             <Card key={t.id}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -763,8 +773,18 @@ function Pay() {
                 })}
               </div>
 
+              {configured && (paid > 0 || earned > 0) && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 11, padding: '9px 11px', background: owed > 0.005 ? C.goldTint : '#eef5ef', borderRadius: 11 }}>
+                  <span style={{ fontSize: 11.5, color: C.muted2 }}>Earned {money(earned)} · Paid {money(paid)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: owed > 0.005 ? C.navy : C.green }}>{owed > 0.005 ? `${money(owed)} owed` : 'Settled'}</span>
+                </div>
+              )}
+
               {canViewBilling && (
-                <button onClick={() => setEdit(t)} style={{ ...chip, marginTop: 11 }}>{t.pay_type ? 'Edit pay' : 'Set pay'}</button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
+                  <button onClick={() => setEdit(t)} style={{ ...chip, flex: 1 }}>{t.pay_type ? 'Edit pay' : 'Set pay'}</button>
+                  <button onClick={() => setPayout(t)} style={{ ...chip, flex: 1, background: C.navy, color: '#fff' }}>Record payout</button>
+                </div>
               )}
             </Card>
           );
@@ -773,11 +793,66 @@ function Pay() {
       </div>
 
       <div style={{ fontSize: 11, color: C.muted2, marginTop: 12, lineHeight: 1.5 }}>
-        Each figure counts lessons assigned to the trainer in that period (week starts Sunday, month and year to date). Set each person's pay type — per lesson, hourly, or a percentage of the lesson fee.
+        Figures count only lessons that have happened (marked complete or past their time) — future bookings don't count yet. Week starts Sunday; month and year are to date. “Owed” is everything earned minus what you've recorded paying out.
       </div>
 
       {edit && <PayConfigModal staff={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
+      {payout && <RecordPayoutModal staff={payout} owed={earnedAll(payout) - paidAll(payout)} history={payouts.filter(p => p.trainer_id === payout.id)} onClose={() => setPayout(null)} onSaved={() => { setPayout(null); reloadPayouts(); }} />}
     </>
+  );
+}
+
+function RecordPayoutModal({ staff, owed, history, onClose, onSaved }:
+  { staff: AppUser; owed: number; history: Payout[]; onClose: () => void; onSaved: () => void }) {
+  const { barn } = useApp();
+  const [amount, setAmount] = useState(owed > 0 ? String(Math.round(owed * 100) / 100) : '');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) { alert('Enter an amount greater than 0.'); return; }
+    setBusy(true);
+    await supabase.from('payouts').insert({ barn_id: barn?.id, trainer_id: staff.id, amount: amt, note: note.trim() || null });
+    setBusy(false); onSaved();
+  }
+  async function del(id: string) {
+    if (!confirm('Remove this payout record?')) return;
+    await supabase.from('payouts').delete().eq('id', id);
+    onSaved();
+  }
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', marginBottom: 10, fontFamily: 'inherit', boxSizing: 'border-box' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 23, color: C.navy, marginBottom: 2 }}>Record payout — {staff.full_name || staff.email}</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>{owed > 0.005 ? `${money(owed)} currently owed.` : 'All settled up.'} Log what you actually paid.</div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Amount paid ($)</div>
+        <input style={inp} value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0" />
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Note (optional)</div>
+        <input style={inp} value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Venmo, check #123, cash" />
+        <Button disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save payout'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+
+        {history.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', color: C.faint, textTransform: 'uppercase', margin: '20px 0 8px' }}>Payout history</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {history.map(p => (
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', borderRadius: 11, padding: '10px 12px' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{money(Number(p.amount))}</div>
+                    <div style={{ fontSize: 10.5, color: C.muted2 }}>{new Date(p.created_at).toLocaleDateString()}{p.note ? ` · ${p.note}` : ''}</div>
+                  </div>
+                  <button onClick={() => del(p.id)} style={{ background: C.redBg, color: C.red, border: 'none', borderRadius: 8, padding: '5px 9px', fontSize: 11, fontWeight: 700, flex: 'none' }}>✕</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -74,6 +74,16 @@ export interface Charge {
   created_at: string;
 }
 
+export interface Payout {
+  id: string;
+  barn_id: string;
+  trainer_id: string;
+  amount: number;
+  note: string | null;
+  paid_on?: string | null;
+  created_at: string;
+}
+
 export interface Rider {
   id: string;
   barn_id: string;
