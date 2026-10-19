@@ -33,6 +33,7 @@ export default function More({ nav, section }: { nav: Nav; section: string | nul
       documents: <Documents />,
       notifications: <Notifications />,
       settings: <Settings />,
+      backup: <Backup />,
       mybill: <MyBill />,
       profile: <Profile />,
     };
@@ -50,7 +51,7 @@ export default function More({ nav, section }: { nav: Nav; section: string | nul
         { title: 'People', items: [{ l: 'Clients & Families', s: 'clients' }, { l: 'Riders', s: 'riders' }, { l: 'Staff & Tasks', s: 'staff' }] },
         { title: 'Scheduling', items: [{ l: 'Scheduling Requests', s: 'requests' }, { l: 'Care Schedule', s: 'care' }, { l: 'Shows & Travel', s: 'shows' }, { l: 'Barn Marketplace', s: 'marketplace' }] },
         { title: 'Money', items: [{ l: 'Financial Reports', s: 'reports' }, { l: canViewBilling ? 'Trainer Pay' : 'My Pay', s: 'pay' }, { l: 'Documents & Contracts', s: 'documents' }] },
-        { title: 'Account', items: [{ l: 'Notifications', s: 'notifications' }, { l: 'Barn Settings', s: 'settings', ownerOnly: true }, { l: 'My Profile', s: 'profile' }] },
+        { title: 'Account', items: [{ l: 'Notifications', s: 'notifications' }, { l: 'Barn Settings', s: 'settings', ownerOnly: true }, { l: 'Export / Backup Data', s: 'backup', ownerOnly: true }, { l: 'My Profile', s: 'profile' }] },
       ];
 
   const roleLabel = role === 'owner' ? 'Barn Owner' : role === 'head_trainer' ? 'Head Trainer' : role === 'trainer' ? 'Trainer' : 'Client';
@@ -126,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 27
+        Signed in as {user?.email} · {role} · build 28
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -1308,6 +1309,121 @@ function Settings() {
       </div>
 
       {saving && <div style={{ fontSize: 12, color: C.green, marginTop: 12, fontWeight: 600 }}>Saved ✓</div>}
+    </>
+  );
+}
+
+/* ---------------- Export / Backup ---------------- */
+function toCSV(rows: any[]): string {
+  if (!rows.length) return '';
+  // Union of all keys so no column is missed.
+  const keys = Array.from(rows.reduce((set: Set<string>, r) => { Object.keys(r).forEach(k => set.add(k)); return set; }, new Set<string>()));
+  const esc = (v: any) => {
+    if (v === null || v === undefined) return '';
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [keys.join(','), ...rows.map(r => keys.map(k => esc(r[k])).join(','))].join('\r\n');
+}
+function downloadFile(name: string, text: string, type = 'text/csv') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const BACKUP_TABLES = [
+  { t: 'families', l: 'Families' },
+  { t: 'riders', l: 'Riders' },
+  { t: 'horses', l: 'Horses' },
+  { t: 'lessons', l: 'Lessons & schedule' },
+  { t: 'lesson_series', l: 'Recurring lessons' },
+  { t: 'arena_bookings', l: 'Arena requests' },
+  { t: 'charges', l: 'Charges' },
+  { t: 'payments', l: 'Payments' },
+  { t: 'payouts', l: 'Trainer payouts' },
+  { t: 'training_sessions', l: 'Training log' },
+  { t: 'users', l: 'Staff' },
+  { t: 'signatures', l: 'Document signatures' },
+];
+
+function Backup() {
+  const [busy, setBusy] = useState<string>('');
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [msg, setMsg] = useState('');
+
+  async function fetchAll(table: string): Promise<any[]> {
+    const { data, error } = await supabase.from(table).select('*');
+    if (error) throw new Error(`${table}: ${error.message}`);
+    return data || [];
+  }
+
+  async function downloadOne(table: string, label: string) {
+    setBusy(table); setMsg('');
+    try {
+      const rows = await fetchAll(table);
+      setCounts(c => ({ ...c, [table]: rows.length }));
+      if (!rows.length) { setMsg(`${label}: nothing to export yet.`); return; }
+      downloadFile(`freerein-${table}-${new Date().toISOString().slice(0, 10)}.csv`, toCSV(rows));
+    } catch (e: any) {
+      setMsg(e.message || 'Export failed.');
+    } finally { setBusy(''); }
+  }
+
+  async function downloadAllJSON() {
+    setBusy('all'); setMsg('');
+    try {
+      const backup: Record<string, any[]> = {};
+      const newCounts: Record<string, number> = {};
+      for (const { t } of BACKUP_TABLES) {
+        try { const rows = await fetchAll(t); backup[t] = rows; newCounts[t] = rows.length; }
+        catch { backup[t] = []; newCounts[t] = 0; }
+      }
+      setCounts(newCounts);
+      downloadFile(
+        `freerein-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify({ exported_at: new Date().toISOString(), tables: backup }, null, 2),
+        'application/json'
+      );
+      setMsg('Full backup downloaded.');
+    } catch (e: any) {
+      setMsg(e.message || 'Backup failed.');
+    } finally { setBusy(''); }
+  }
+
+  return (
+    <>
+      <H>Export / Backup Data</H>
+      <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 14, lineHeight: 1.5 }}>
+        Download your own copy of everything in the app. App updates never touch this data — this is an extra safety net you control. A good habit: grab a full backup weekly.
+      </div>
+
+      <Button onClick={downloadAllJSON} disabled={!!busy}>{busy === 'all' ? 'Preparing…' : '⬇ Download full backup (one file)'}</Button>
+      <div style={{ fontSize: 11, color: C.muted2, margin: '7px 2px 0', lineHeight: 1.4 }}>
+        One JSON file with every table — the most complete snapshot. Keep it somewhere safe (email it to yourself, cloud drive, etc.).
+      </div>
+
+      <SectionLabel>Or download a single spreadsheet (CSV)</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {BACKUP_TABLES.map(({ t, l }) => (
+          <Card key={t} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{l}</div>
+              {counts[t] !== undefined && <div style={{ fontSize: 11, color: C.muted2 }}>{counts[t]} row{counts[t] === 1 ? '' : 's'}</div>}
+            </div>
+            <button onClick={() => downloadOne(t, l)} disabled={!!busy} style={{ ...chip, opacity: busy ? 0.5 : 1 }}>{busy === t ? '…' : 'CSV'}</button>
+          </Card>
+        ))}
+      </div>
+
+      {msg && <div style={{ fontSize: 12.5, color: C.navy, marginTop: 12, fontWeight: 600 }}>{msg}</div>}
+
+      <div style={{ fontSize: 11, color: C.muted2, marginTop: 16, lineHeight: 1.5 }}>
+        CSV files open in Excel, Numbers, or Google Sheets. The full JSON backup is the one to keep for true restore safety.
+      </div>
     </>
   );
 }
