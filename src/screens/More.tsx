@@ -126,7 +126,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 24
+        Signed in as {user?.email} · {role} · build 25
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -720,20 +720,24 @@ function Pay() {
 
   const now = new Date();
   const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
 
   const shown = canViewBilling ? staff : staff.filter(s => s.id === user?.id);
 
   // A lesson is "earned" once it has happened: marked completed, or its start time has passed.
-  const earnedLessons = (t: AppUser, from: Date) =>
-    lessons.filter(l => l.trainer_id === t.id
-      && new Date(l.starts_at) >= from
-      && (l.status === 'completed' || new Date(l.starts_at) <= now));
-  const payIn = (t: AppUser, from: Date) => payFor(t, earnedLessons(t, from));
-  const countIn = (t: AppUser, from: Date) => earnedLessons(t, from).length;
+  const isEarned = (l: Lesson) => l.status === 'completed' || new Date(l.starts_at) <= now;
+  // Earned lessons for a trainer within a [from, to) window.
+  const earnedLessons = (t: AppUser, from: Date, to: Date) =>
+    lessons.filter(l => l.trainer_id === t.id && isEarned(l)
+      && new Date(l.starts_at) >= from && new Date(l.starts_at) < to);
+  const payIn = (t: AppUser, from: Date, to: Date) => payFor(t, earnedLessons(t, from, to));
+  const countIn = (t: AppUser, from: Date, to: Date) => earnedLessons(t, from, to).length;
   // Total earned all-time vs paid out all-time → still owed.
-  const earnedAll = (t: AppUser) => payFor(t, earnedLessons(t, new Date(2000, 0, 1)));
+  const earnedAll = (t: AppUser) => payFor(t, lessons.filter(l => l.trainer_id === t.id && isEarned(l)));
   const paidAll = (t: AppUser) => payouts.filter(p => p.trainer_id === t.id).reduce((s, p) => s + Number(p.amount || 0), 0);
 
   return (
@@ -743,10 +747,10 @@ function Pay() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {shown.map(t => {
           const configured = !!t.pay_type && t.pay_type !== 'manual';
-          const tiles: { l: string; from: Date }[] = [
-            { l: 'This week', from: weekStart },
-            { l: 'This month', from: monthStart },
-            { l: 'This year', from: yearStart },
+          const tiles: { l: string; from: Date; to: Date }[] = [
+            { l: 'This week', from: weekStart, to: weekEnd },
+            { l: 'This month', from: monthStart, to: monthEnd },
+            { l: 'This year', from: yearStart, to: yearEnd },
           ];
           const earned = earnedAll(t);
           const paid = paidAll(t);
@@ -762,11 +766,11 @@ function Pay() {
 
               <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
                 {tiles.map(tile => {
-                  const n = countIn(t, tile.from);
+                  const n = countIn(t, tile.from, tile.to);
                   return (
                     <div key={tile.l} style={{ flex: 1, background: C.page, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
                       <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '0.04em', color: C.faint, textTransform: 'uppercase' }}>{tile.l}</div>
-                      <div style={{ fontFamily: serif, fontSize: 19, color: configured ? C.green : C.faint, marginTop: 2 }}>{configured ? money(payIn(t, tile.from)) : '—'}</div>
+                      <div style={{ fontFamily: serif, fontSize: 19, color: configured ? C.green : C.faint, marginTop: 2 }}>{configured ? money(payIn(t, tile.from, tile.to)) : '—'}</div>
                       <div style={{ fontSize: 9.5, color: C.muted2, marginTop: 1 }}>{n} lesson{n === 1 ? '' : 's'}</div>
                     </div>
                   );
