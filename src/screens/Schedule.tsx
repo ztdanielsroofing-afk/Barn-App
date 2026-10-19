@@ -13,6 +13,12 @@ const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 const lessonColor = (t: string) => ({ Private: C.navy, 'Semi-private': C.purple, Group: C.green, Training: C.gold } as any)[t] || C.navy;
+const riderNames = (l: Lesson): string[] =>
+  (l.participants && l.participants.length ? l.participants.map(p => p.name) : (l.rider_name ? [l.rider_name] : []));
+const riderTitle = (l: Lesson): string => {
+  const ns = riderNames(l);
+  return ns.length > 1 ? `${ns.length} riders · ${ns.join(', ')}` : (ns[0] || 'Lesson');
+};
 
 export default function Schedule({ nav: _nav }: { nav: Nav }) {
   const { isStaff, isClient } = useApp();
@@ -95,7 +101,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
           <Card key={l.id} onClick={() => setOpen(l)} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 4, alignSelf: 'stretch', borderRadius: 4, background: lessonColor(l.lesson_type) }} />
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{l.rider_name || 'Lesson'}{l.horse_name ? ` · ${l.horse_name}` : ''}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{riderTitle(l)}{l.horse_name ? ` · ${l.horse_name}` : ''}</div>
               <div style={{ fontSize: 11, color: C.muted2 }}>{l.time_label}{l.trainer_name ? ` · ${l.trainer_name}` : ''}</div>
             </div>
             <Pill color={lessonColor(l.lesson_type)}>{l.lesson_type}</Pill>
@@ -133,8 +139,8 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   const { data: horses } = useTable<Horse>('horses', q => q.order('name'));
   const { data: staff } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
 
-  const [riderName, setRiderName] = useState('');
-  const [familyId, setFamilyId] = useState<string | null>(null);
+  const [people, setPeople] = useState<{ name: string; family_id: string | null }[]>([]);
+  const [manual, setManual] = useState('');
   const [horse, setHorse] = useState('');
   const [trainerId, setTrainerId] = useState('');
   const [type, setType] = useState('Private');
@@ -144,27 +150,33 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   const [weeks, setWeeks] = useState('12');
   const [busy, setBusy] = useState(false);
 
-  const ready = riderName.trim().length > 0;
+  const ready = people.length > 0;
   const dowName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getDay()];
 
-  function pickRider(id: string) {
+  function addRiderById(id: string) {
     const r = riders.find(x => x.id === id);
-    if (r) { setRiderName(r.full_name); setFamilyId(r.family_id); }
+    if (r && !people.some(p => p.name === r.full_name)) setPeople([...people, { name: r.full_name, family_id: r.family_id }]);
   }
+  function addManual() {
+    const n = manual.trim();
+    if (n && !people.some(p => p.name === n)) { setPeople([...people, { name: n, family_id: null }]); setManual(''); }
+  }
+  function removePerson(i: number) { setPeople(people.filter((_, j) => j !== i)); }
 
   async function save() {
     setBusy(true);
     try {
       const trainer = staff.find(s => s.id === trainerId);
+      const primary = people[0];
       const base: any = {
-        barn_id: barn?.id, rider_name: riderName.trim(), family_id: familyId,
+        barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, participants: people,
         horse_name: horse || null, lesson_type: type, time_label: time || null,
         fee: Number(fee) || 0, trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
         status: 'booked',
       };
       if (repeat) {
         const { data: series } = await supabase.from('lesson_series').insert({
-          barn_id: barn?.id, rider_name: riderName.trim(), family_id: familyId, horse_name: horse || null,
+          barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, horse_name: horse || null,
           trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
           lesson_type: type, dow: day.getDay(), time_label: time || null, fee: Number(fee) || 0,
         }).select('id').single();
@@ -192,14 +204,27 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Add a lesson</div>
         <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>{day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
 
-        <div style={lbl}>Rider</div>
+        <div style={lbl}>Rider(s) — add more than one for a group lesson</div>
         {riders.length > 0 && (
-          <select value={riders.find(r => r.full_name === riderName)?.id || ''} onChange={e => pickRider(e.target.value)} style={inp}>
-            <option value="">Pick a rider…</option>
+          <select value="" onChange={e => { addRiderById(e.target.value); e.target.value = ''; }} style={inp}>
+            <option value="">Add a rider…</option>
             {riders.map(r => <option key={r.id} value={r.id}>{r.full_name}</option>)}
           </select>
         )}
-        <input style={inp} placeholder="Rider name" value={riderName} onChange={e => setRiderName(e.target.value)} />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <input style={{ ...inp, marginBottom: 0 }} placeholder="or type a name" value={manual} onChange={e => setManual(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addManual(); }} />
+          <button onClick={addManual} style={{ background: C.goldTint, color: C.navy, border: 'none', borderRadius: 12, padding: '0 16px', fontSize: 13, fontWeight: 700, flex: 'none' }}>Add</button>
+        </div>
+        {people.length > 0 && (
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 12 }}>
+            {people.map((p, i) => (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.navy, color: '#fff', borderRadius: 20, padding: '6px 10px', fontSize: 12.5, fontWeight: 700 }}>
+                {p.name}
+                <button onClick={() => removePerson(i)} style={{ background: 'rgba(255,255,255,0.25)', color: '#fff', border: 'none', borderRadius: 20, width: 18, height: 18, fontSize: 12, lineHeight: 1 }}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div style={lbl}>Horse</div>
         <select value={horse} onChange={e => setHorse(e.target.value)} style={inp}>
@@ -263,21 +288,38 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
     await supabase.from('lessons').delete().eq('id', lesson.id);
     onBack();
   }
+  async function addRider() {
+    const name = prompt('Add a rider to this lesson:'); if (!name || !name.trim()) return;
+    const current = lesson.participants && lesson.participants.length
+      ? lesson.participants
+      : (lesson.rider_name ? [{ name: lesson.rider_name, family_id: lesson.family_id || null }] : []);
+    const next = [...current, { name: name.trim(), family_id: null }];
+    await supabase.from('lessons').update({
+      participants: next,
+      rider_name: next[0].name,
+      lesson_type: lesson.lesson_type === 'Private' ? 'Group' : lesson.lesson_type,
+    }).eq('id', lesson.id);
+    onBack();
+  }
 
   return (
     <Page>
       <button onClick={onBack} style={{ background: '#fff', border: 'none', borderRadius: 11, padding: '8px 13px', fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 12 }}>‹ Schedule</button>
-      <div style={{ fontFamily: serif, fontSize: 25, color: C.navy }}>{lesson.rider_name || 'Lesson'}</div>
+      <div style={{ fontFamily: serif, fontSize: 25, color: C.navy }}>{lesson.lesson_type} lesson</div>
       <div style={{ fontSize: 12, color: C.muted2, marginBottom: 12 }}>
         {new Date(lesson.starts_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {lesson.time_label}
       </div>
       <Card>
-        <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{lesson.lesson_type} lesson</div>
-        <div style={{ fontSize: 12, color: C.muted2, marginTop: 4 }}>Horse: {lesson.horse_name || '—'}</div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted, marginBottom: 4 }}>Rider{riderNames(lesson).length > 1 ? 's' : ''}</div>
+        {riderNames(lesson).map((n, i) => (
+          <div key={i} style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{n}</div>
+        ))}
+        <div style={{ fontSize: 12, color: C.muted2, marginTop: 8 }}>Horse: {lesson.horse_name || '—'}{lesson.trainer_name ? ` · Trainer: ${lesson.trainer_name}` : ''}</div>
       </Card>
 
       {isStaff && (
         <>
+          <div style={{ marginTop: 12 }}><Button kind="soft" onClick={addRider}>+ Add another rider (group)</Button></div>
           <SectionLabel>Assign horse</SectionLabel>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
             {horses.map(h => (
@@ -307,19 +349,28 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
   );
 }
 
-// When a lesson is completed, auto-post its fee to per-lesson families (once).
+// When a lesson is completed, auto-post its fee to each participating per-lesson
+// family (once per family) — covers group lessons where several families attend.
 async function autoChargeLesson(lesson: Lesson) {
-  if (!lesson.family_id || !lesson.fee || Number(lesson.fee) <= 0) return;
-  const { data: fam } = await supabase.from('families').select('billing_mode, barn_id').eq('id', lesson.family_id).maybeSingle();
-  if ((fam as any)?.billing_mode !== 'per_lesson') return;
-  const { data: existing } = await supabase.from('charges').select('id').eq('lesson_id', lesson.id).limit(1);
-  if (existing && existing.length) return;
-  await supabase.from('charges').insert({
-    barn_id: (fam as any).barn_id, family_id: lesson.family_id, lesson_id: lesson.id, amount: Number(lesson.fee),
-    label: `Lesson — ${new Date(lesson.starts_at).toLocaleDateString()}${lesson.rider_name ? ` (${lesson.rider_name})` : ''}`,
-  });
-  await notify({ barn_id: (fam as any).barn_id, family_id: lesson.family_id, kind: 'billing',
-    title: 'Lesson charged', body: `${new Date(lesson.starts_at).toLocaleDateString()} · $${Number(lesson.fee)}` });
+  if (!lesson.fee || Number(lesson.fee) <= 0) return;
+  const parts = (lesson.participants && lesson.participants.length
+    ? lesson.participants
+    : (lesson.family_id ? [{ name: lesson.rider_name || '', family_id: lesson.family_id }] : []));
+  const famIds = [...new Set(parts.map(p => p.family_id).filter(Boolean) as string[])];
+  if (!famIds.length) return;
+  const { data: fams } = await supabase.from('families').select('id, billing_mode, barn_id').in('id', famIds);
+  const { data: existing } = await supabase.from('charges').select('family_id').eq('lesson_id', lesson.id);
+  const charged = new Set((existing || []).map((c: any) => c.family_id));
+  for (const fam of (fams || []) as any[]) {
+    if (fam.billing_mode !== 'per_lesson' || charged.has(fam.id)) continue;
+    const who = parts.find(p => p.family_id === fam.id)?.name;
+    await supabase.from('charges').insert({
+      barn_id: fam.barn_id, family_id: fam.id, lesson_id: lesson.id, amount: Number(lesson.fee),
+      label: `Lesson — ${new Date(lesson.starts_at).toLocaleDateString()}${who ? ` (${who})` : ''}`,
+    });
+    await notify({ barn_id: fam.barn_id, family_id: fam.id, kind: 'billing',
+      title: 'Lesson charged', body: `${new Date(lesson.starts_at).toLocaleDateString()} · $${Number(lesson.fee)}` });
+  }
 }
 
 const KINDS = ['Reschedule', 'New booking', 'Cancel', 'Free ride'] as const;
@@ -528,13 +579,22 @@ function ArenaDay({ date }: { date: Date }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {slots.map(slot => {
           const info = slotInfo(slot);
-          const col = COLORS[info.state];
+          // For a lesson slot, show the lesson TYPE (Group/Private/…); group lessons
+          // get the gold "limited space" color, others red (full).
+          const isGroup = info.state === 'lesson' && /group|semi/i.test(info.lesson?.lesson_type || '');
+          const col = info.state === 'lesson'
+            ? { c: isGroup ? C.gold : C.red, label: `${info.lesson?.lesson_type || 'Lesson'} lesson` }
+            : COLORS[info.state];
+          const lessonRiders = info.state === 'lesson' && info.lesson ? riderNames(info.lesson) : [];
           return (
             <div key={slot} style={{ background: '#fff', borderRadius: 12, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 11 }}>
               <span style={{ width: 10, height: 10, borderRadius: 3, background: col.c, flex: 'none' }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{slot}</span>
                 <span style={{ fontSize: 12, color: col.c, fontWeight: 700, marginLeft: 8 }}>{col.label}</span>
+                {info.state === 'lesson' && lessonRiders.length > 0 && (
+                  <span style={{ fontSize: 11, color: C.muted2, marginLeft: 6 }}>· {lessonRiders.join(', ')}</span>
+                )}
                 {info.state !== 'open' && info.state !== 'lesson' && info.booking?.rider_name && (
                   <span style={{ fontSize: 11, color: C.muted2, marginLeft: 6 }}>· {info.booking.rider_name}</span>
                 )}
