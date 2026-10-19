@@ -10,6 +10,7 @@ export interface Barn {
   paypal: string | null;
   cashapp: string | null;
   head_can_edit_billing: boolean;
+  head_can_edit_staff?: boolean;
   arena_open?: string | null;
   arena_close?: string | null;
   arena_days?: Record<string, boolean> | null;

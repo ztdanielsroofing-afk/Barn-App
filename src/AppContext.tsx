@@ -13,6 +13,7 @@ interface Ctx {
   setPreviewRole: (r: Role | null) => void;
   canViewBilling: boolean;
   canEditBilling: boolean;
+  canManageStaff: boolean;
   isStaff: boolean;
   isClient: boolean;
   refresh: () => Promise<void>;
@@ -88,6 +89,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const canViewBilling = role === 'owner' || role === 'head_trainer';
   const canEditBilling =
     role === 'owner' || (role === 'head_trainer' && !!barn?.head_can_edit_billing);
+  const canManageStaff =
+    role === 'owner' || (role === 'head_trainer' && !!barn?.head_can_edit_staff);
 
   return (
     <AppCtx.Provider
@@ -95,7 +98,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loading, session, user, barn, role,
         actualRole, previewRole,
         setPreviewRole: actualRole === 'owner' ? setPreviewRole : () => {},
-        canViewBilling, canEditBilling, isStaff, isClient,
+        canViewBilling, canEditBilling, canManageStaff, isStaff, isClient,
         refresh, signOut,
       }}
     >

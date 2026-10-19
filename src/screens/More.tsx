@@ -126,7 +126,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 26
+        Signed in as {user?.email} · {role} · build 27
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -364,11 +364,12 @@ function Riders() {
 
 /* ---------------- Staff & Tasks ---------------- */
 function Staff() {
-  const { barn, role } = useApp();
+  const { barn, role, canManageStaff } = useApp();
   const { data: staff, reload: reloadStaff } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
   const { data: tasks, reload: reloadTasks } = useTable<TaskRow>('tasks', q => q.order('time_label'));
   const [addingTeam, setAddingTeam] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
+  const [editStaff, setEditStaff] = useState<AppUser | null>(null);
 
   async function delTask(id: string, label: string) {
     if (!confirm(`Delete task "${label}"?`)) return;
@@ -388,13 +389,14 @@ function Staff() {
       <H>Staff &amp; Tasks</H>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <SectionLabel style={{ margin: 0 }}>Team</SectionLabel>
-        {role === 'owner' && <button onClick={() => setAddingTeam(true)} style={chip}>+ Add team member</button>}
+        {canManageStaff && <button onClick={() => setAddingTeam(true)} style={chip}>+ Add team member</button>}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {staff.map(s => (
           <Card key={s.id} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <Avatar init={(s.full_name || '?').slice(0, 1)} tint={C.navy} />
             <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{s.full_name || s.email}</div><div style={{ fontSize: 11, color: C.muted2, textTransform: 'capitalize' }}>{s.role.replace('_', ' ')}</div></div>
+            {canManageStaff && <button onClick={() => setEditStaff(s)} style={{ ...chip, padding: '7px 12px' }}>Edit</button>}
             {role === 'owner' && <button onClick={() => delStaff(s)} style={delX}>Remove</button>}
           </Card>
         ))}
@@ -418,7 +420,61 @@ function Staff() {
 
       {addingTeam && <InviteStaffModal barnId={barn?.id} onClose={() => setAddingTeam(false)} onSent={() => { setAddingTeam(false); reloadStaff(); }} />}
       {addingTask && <AddTaskModal barnId={barn?.id} onClose={() => setAddingTask(false)} onSaved={() => { setAddingTask(false); reloadTasks(); }} />}
+      {editStaff && <EditStaffModal staff={editStaff} editorIsOwner={role === 'owner'} onClose={() => setEditStaff(null)} onSaved={() => { setEditStaff(null); reloadStaff(); }} />}
     </>
+  );
+}
+
+function EditStaffModal({ staff, editorIsOwner, onClose, onSaved }:
+  { staff: AppUser; editorIsOwner: boolean; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(staff.full_name || '');
+  const [chosen, setChosen] = useState<Role>(staff.role);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Only an owner can grant or remove the owner role.
+  const ROLES: { v: Role; l: string; d: string }[] = [
+    { v: 'trainer', l: 'Trainer', d: 'Teaches lessons, logs training' },
+    { v: 'head_trainer', l: 'Head trainer', d: 'Trainer + manages schedule & staff' },
+    ...(editorIsOwner || staff.role === 'owner' ? [{ v: 'owner' as Role, l: 'Owner', d: 'Full access, including billing' }] : []),
+  ];
+
+  async function save() {
+    if (!name.trim()) { setErr('Name is required.'); return; }
+    setErr(''); setBusy(true);
+    const { error } = await supabase.from('users').update({ full_name: name.trim(), role: chosen }).eq('id', staff.id);
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    onSaved();
+  }
+
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '13px 14px', fontSize: 15, background: '#fff', outline: 'none', marginBottom: 4, fontFamily: 'inherit', boxSizing: 'border-box' };
+  const lbl: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, color: C.muted, margin: '10px 0 5px' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 4 }}>Edit team member</div>
+        <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 8 }}>{staff.email}</div>
+        <div style={lbl}>Name *</div>
+        <input style={inp} value={name} onChange={e => setName(e.target.value)} autoFocus />
+        <div style={lbl}>Role *</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {ROLES.map(r => (
+            <button key={r.v} onClick={() => setChosen(r.v)} style={{
+              textAlign: 'left', border: chosen === r.v ? `2px solid ${C.navy}` : `1px solid ${C.page}`, borderRadius: 12,
+              padding: '11px 13px', background: chosen === r.v ? C.infoBg : '#fff', cursor: 'pointer',
+            }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{r.l}</div>
+              <div style={{ fontSize: 11, color: C.muted2 }}>{r.d}</div>
+            </button>
+          ))}
+        </div>
+        {err && <div style={{ color: C.red, fontSize: 12.5, margin: '10px 2px 0', fontWeight: 600 }}>{err}</div>}
+        <Button disabled={busy} onClick={save} style={{ marginTop: 16 }}>{busy ? 'Saving…' : 'Save changes'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 
@@ -1240,10 +1296,16 @@ function Settings() {
       </div>
 
       <SectionLabel>Permissions</SectionLabel>
-      <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Head trainer can edit billing</span>
-        <input type="checkbox" defaultChecked={!!barn.head_can_edit_billing} onChange={e => set({ head_can_edit_billing: e.target.checked }, 'perm')} style={{ width: 20, height: 20 }} />
-      </Card>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Head trainer can edit billing</span>
+          <input type="checkbox" defaultChecked={!!barn.head_can_edit_billing} onChange={e => set({ head_can_edit_billing: e.target.checked }, 'perm')} style={{ width: 20, height: 20 }} />
+        </Card>
+        <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Head trainer can edit staff</span>
+          <input type="checkbox" defaultChecked={!!barn.head_can_edit_staff} onChange={e => set({ head_can_edit_staff: e.target.checked }, 'perm')} style={{ width: 20, height: 20 }} />
+        </Card>
+      </div>
 
       {saving && <div style={{ fontSize: 12, color: C.green, marginTop: 12, fontWeight: 600 }}>Saved ✓</div>}
     </>
