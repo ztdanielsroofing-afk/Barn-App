@@ -126,7 +126,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 25
+        Signed in as {user?.email} · {role} · build 26
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -367,32 +367,13 @@ function Staff() {
   const { barn, role } = useApp();
   const { data: staff, reload: reloadStaff } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
   const { data: tasks, reload: reloadTasks } = useTable<TaskRow>('tasks', q => q.order('time_label'));
+  const [addingTeam, setAddingTeam] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
 
-  async function addTask() {
-    const label = prompt('Task? (e.g. "Cold-hose left front 10 min")'); if (!label) return;
-    const type = (prompt('Type? FEED / CARE / CHORE', 'CARE') || 'CARE').toUpperCase();
-    const horse = prompt('Which horse (or "Whole barn")?', 'Whole barn') || '';
-    const who = prompt('Assign to whom? (name)', '') || '';
-    const time = prompt('Time? (e.g. "4:30 PM")', '') || '';
-    await supabase.from('tasks').insert({ barn_id: barn?.id, label, task_type: type, horse_name: horse, assignee_name: who, time_label: time, done: false });
-    reloadTasks();
-  }
   async function delTask(id: string, label: string) {
     if (!confirm(`Delete task "${label}"?`)) return;
     await supabase.from('tasks').delete().eq('id', id);
     reloadTasks();
-  }
-  async function addTeamMember() {
-    const name = prompt("Team member's name?"); if (!name) return;
-    const email = prompt(`Email for ${name}?\n\nWe'll email them a sign-in link that ties them to the barn.`);
-    if (!email) return;
-    const roleInput = (prompt('Role? Type one of:\ntrainer  ·  head_trainer  ·  owner', 'trainer') || 'trainer')
-      .trim().toLowerCase().replace(' ', '_');
-    const allowed = ['trainer', 'head_trainer', 'owner'];
-    const chosen: Role = (allowed.includes(roleInput) ? roleInput : 'trainer') as Role;
-    const res = await sendInvite({ email, role: chosen, barn_id: barn?.id, full_name: name });
-    if (res.ok) alert(`Invite emailed to ${email} as ${chosen.replace('_', ' ')}. When they open the link they're added to the barn.`);
-    else alert('Invite failed: ' + res.error);
   }
   async function delStaff(s: AppUser) {
     if (role !== 'owner') { alert('Only the owner can remove team members.'); return; }
@@ -407,7 +388,7 @@ function Staff() {
       <H>Staff &amp; Tasks</H>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <SectionLabel style={{ margin: 0 }}>Team</SectionLabel>
-        {role === 'owner' && <button onClick={addTeamMember} style={chip}>+ Add team member</button>}
+        {role === 'owner' && <button onClick={() => setAddingTeam(true)} style={chip}>+ Add team member</button>}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {staff.map(s => (
@@ -421,7 +402,7 @@ function Staff() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 8px' }}>
         <SectionLabel style={{ margin: 0 }}>Today's tasks</SectionLabel>
-        <button onClick={addTask} style={chip}>+ Add task</button>
+        <button onClick={() => setAddingTask(true)} style={chip}>+ Add task</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {tasks.map(t => (
@@ -434,7 +415,121 @@ function Staff() {
         ))}
         {tasks.length === 0 && <Empty>No tasks yet. Tap “+ Add task”.</Empty>}
       </div>
+
+      {addingTeam && <InviteStaffModal barnId={barn?.id} onClose={() => setAddingTeam(false)} onSent={() => { setAddingTeam(false); reloadStaff(); }} />}
+      {addingTask && <AddTaskModal barnId={barn?.id} onClose={() => setAddingTask(false)} onSaved={() => { setAddingTask(false); reloadTasks(); }} />}
     </>
+  );
+}
+
+function InviteStaffModal({ barnId, onClose, onSent }: { barnId?: string; onClose: () => void; onSent: () => void }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [chosen, setChosen] = useState<Role>('trainer');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState('');
+
+  const emailOk = /\S+@\S+\.\S+/.test(email.trim());
+  const ready = name.trim().length > 0 && emailOk;
+
+  async function send() {
+    setErr(''); setBusy(true);
+    try {
+      const res = await sendInvite({ email: email.trim(), role: chosen, barn_id: barnId, full_name: name.trim() });
+      if (!res.ok) throw new Error(res.error || 'The invite email failed to send.');
+      setDone(`Invite emailed to ${email.trim()} as ${chosen.replace('_', ' ')}. When they open the link they're added to the barn.`);
+    } catch (e: any) {
+      setErr(e.message || 'Something went wrong.');
+    } finally { setBusy(false); }
+  }
+
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '13px 14px', fontSize: 15, background: '#fff', outline: 'none', marginBottom: 4, fontFamily: 'inherit', boxSizing: 'border-box' };
+  const lbl: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, color: C.muted, margin: '10px 0 5px' };
+  const ROLES: { v: Role; l: string; d: string }[] = [
+    { v: 'trainer', l: 'Trainer', d: 'Teaches lessons, logs training' },
+    { v: 'head_trainer', l: 'Head trainer', d: 'Trainer + manages schedule & staff' },
+    { v: 'owner', l: 'Owner', d: 'Full access, including billing' },
+  ];
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        {done ? (
+          <div style={{ textAlign: 'center', padding: '16px 0' }}>
+            <div style={{ fontFamily: serif, fontSize: 24, color: C.green, marginBottom: 8 }}>Invite sent ✓</div>
+            <p style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.6 }}>{done}</p>
+            <Button onClick={onSent} style={{ marginTop: 14 }}>Done</Button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 4 }}>Add a team member</div>
+            <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 8, lineHeight: 1.5 }}>Enter their name, email, and role. They’ll get an emailed sign-in link that ties them to the barn.</div>
+            <div style={lbl}>Name *</div>
+            <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Jamie Cole" autoFocus />
+            <div style={lbl}>Email address *</div>
+            <input style={inp} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" inputMode="email" autoCapitalize="none" />
+            <div style={lbl}>Role *</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {ROLES.map(r => (
+                <button key={r.v} onClick={() => setChosen(r.v)} style={{
+                  textAlign: 'left', border: chosen === r.v ? `2px solid ${C.navy}` : `1px solid ${C.page}`, borderRadius: 12,
+                  padding: '11px 13px', background: chosen === r.v ? C.infoBg : '#fff', cursor: 'pointer',
+                }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{r.l}</div>
+                  <div style={{ fontSize: 11, color: C.muted2 }}>{r.d}</div>
+                </button>
+              ))}
+            </div>
+            {err && <div style={{ color: C.red, fontSize: 12.5, margin: '10px 2px 0', fontWeight: 600 }}>{err}</div>}
+            <Button disabled={!ready || busy} onClick={send} style={{ marginTop: 16 }}>{busy ? 'Sending…' : 'Send invite'}</Button>
+            <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddTaskModal({ barnId, onClose, onSaved }: { barnId?: string; onClose: () => void; onSaved: () => void }) {
+  const [label, setLabel] = useState('');
+  const [type, setType] = useState('CARE');
+  const [horse, setHorse] = useState('Whole barn');
+  const [who, setWho] = useState('');
+  const [time, setTime] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!label.trim()) { alert('Enter what the task is.'); return; }
+    setBusy(true);
+    await supabase.from('tasks').insert({ barn_id: barnId, label: label.trim(), task_type: type, horse_name: horse.trim() || 'Whole barn', assignee_name: who.trim() || null, time_label: time.trim() || null, done: false });
+    setBusy(false); onSaved();
+  }
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, background: '#fff', outline: 'none', marginBottom: 4, fontFamily: 'inherit', boxSizing: 'border-box' };
+  const lbl: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, color: C.muted, margin: '10px 0 5px' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 8 }}>Add a task</div>
+        <div style={lbl}>Task *</div>
+        <input style={inp} value={label} onChange={e => setLabel(e.target.value)} placeholder='e.g. Cold-hose left front 10 min' autoFocus />
+        <div style={lbl}>Type</div>
+        <div style={{ display: 'flex', gap: 7 }}>
+          {['FEED', 'CARE', 'CHORE'].map(t => (
+            <button key={t} onClick={() => setType(t)} style={{ flex: 1, border: 'none', borderRadius: 10, padding: '10px 4px', fontSize: 12.5, fontWeight: 700, background: type === t ? C.navy : '#fff', color: type === t ? '#fff' : C.muted }}>{t}</button>
+          ))}
+        </div>
+        <div style={lbl}>Horse</div>
+        <input style={inp} value={horse} onChange={e => setHorse(e.target.value)} placeholder="Whole barn" />
+        <div style={lbl}>Assign to</div>
+        <input style={inp} value={who} onChange={e => setWho(e.target.value)} placeholder="Name (optional)" />
+        <div style={lbl}>Time</div>
+        <input style={inp} value={time} onChange={e => setTime(e.target.value)} placeholder='e.g. 4:30 PM (optional)' />
+        <Button disabled={busy} onClick={save} style={{ marginTop: 14 }}>{busy ? 'Saving…' : 'Add task'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 const taskColor = (t?: string | null) => ({ FEED: C.gold, CARE: C.green, CHORE: C.navy } as any)[t || ''] || C.navy;
