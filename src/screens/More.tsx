@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 28
+        Signed in as {user?.email} · {role} · build 29
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -146,10 +146,17 @@ function Clients({ nav: _nav }: { nav: Nav }) {
   const [adding, setAdding] = useState(false);
 
   async function delFamily(f: Family) {
-    if (!confirm(`Delete the ${f.family_name}? This also removes their riders.`)) return;
+    if (!confirm(`Delete the ${f.family_name}? This also removes their riders, lessons, and billing history.`)) return;
     if (!confirm('This permanently deletes the family and can’t be undone. Are you absolutely sure?')) return;
-    await supabase.from('families').delete().eq('id', f.id);
-    setOpen(null); reload();
+    // Clean up everything tied to this family first so the delete never hits a
+    // foreign-key constraint. Each is wrapped so a missing column/table is skipped.
+    const deps = ['riders', 'charges', 'payments', 'arena_bookings', 'schedule_requests', 'signatures', 'notifications', 'lessons'];
+    for (const t of deps) {
+      try { await supabase.from(t).delete().eq('family_id', f.id); } catch { /* table may not have family_id */ }
+    }
+    const { error } = await supabase.from('families').delete().eq('id', f.id);
+    if (error) { alert('Could not delete the family: ' + error.message); return; }
+    setOpen(null); reload(); reloadC(); reloadP();
   }
 
   if (open && bill) return (
