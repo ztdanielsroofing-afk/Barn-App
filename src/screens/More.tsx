@@ -126,7 +126,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 22
+        Signed in as {user?.email} · {role} · build 23
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -703,56 +703,68 @@ function payFor(t: AppUser, ls: Lesson[]) {
   return 0;
 }
 
+function payRateLabel(t: AppUser): string {
+  if (!t.pay_type || t.pay_type === 'manual') return t.pay_type === 'manual' ? 'manual pay' : 'pay not set';
+  const rate = Number(t.pay_rate || 0);
+  if (t.pay_type === 'percent') return `${rate}% of lesson fee`;
+  return `${money(rate)} ${PAY_LABEL[t.pay_type]}`;
+}
+
 function Pay() {
   const { canViewBilling, user } = useApp();
   const { data: staff, reload } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
   const { data: lessons } = useTable<Lesson>('lessons', q => q.order('starts_at'));
-  const [period, setPeriod] = useState<'week' | 'month' | 'all'>('month');
   const [edit, setEdit] = useState<AppUser | null>(null);
 
   const now = new Date();
-  const start = new Date(now);
-  if (period === 'week') { start.setDate(now.getDate() - now.getDay()); start.setHours(0, 0, 0, 0); }
-  else if (period === 'month') { start.setDate(1); start.setHours(0, 0, 0, 0); }
-  else { start.setFullYear(2000); }
-  const inRange = (iso: string) => new Date(iso) >= start;
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0, 0, 0, 0);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
 
   const shown = canViewBilling ? staff : staff.filter(s => s.id === user?.id);
 
-  const periodBtn = (p: typeof period, l: string) => (
-    <button key={p} onClick={() => setPeriod(p)} style={{ flex: 1, border: 'none', borderRadius: 10, padding: '9px 4px', fontSize: 12.5, fontWeight: 700, background: period === p ? C.navy : '#fff', color: period === p ? '#fff' : C.muted }}>{l}</button>
-  );
+  // Pay for a trainer over lessons on/after `from`.
+  const payIn = (t: AppUser, from: Date) =>
+    payFor(t, lessons.filter(l => l.trainer_id === t.id && new Date(l.starts_at) >= from));
+  const countIn = (t: AppUser, from: Date) =>
+    lessons.filter(l => l.trainer_id === t.id && new Date(l.starts_at) >= from).length;
 
   return (
     <>
       <H>{canViewBilling ? 'Trainer Pay' : 'My Pay'}</H>
-      <div style={{ display: 'flex', gap: 7, marginBottom: 12 }}>
-        {periodBtn('week', 'This week')}
-        {periodBtn('month', 'This month')}
-        {periodBtn('all', 'All time')}
-      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {shown.map(t => {
-          const ls = lessons.filter(l => l.trainer_id === t.id && inRange(l.starts_at));
-          const amt = payFor(t, ls);
           const configured = !!t.pay_type && t.pay_type !== 'manual';
+          const tiles: { l: string; from: Date }[] = [
+            { l: 'This week', from: weekStart },
+            { l: 'This month', from: monthStart },
+            { l: 'This year', from: yearStart },
+          ];
           return (
             <Card key={t.id}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{t.full_name || t.email}</div>
-                  <div style={{ fontSize: 11, color: C.muted2 }}>
-                    {ls.length} lesson{ls.length === 1 ? '' : 's'}
-                    {t.pay_type ? ` · ${money(Number(t.pay_rate || 0))}${t.pay_type === 'percent' ? '%' : ''} ${PAY_LABEL[t.pay_type]}` : ' · pay not set'}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontFamily: serif, fontSize: 20, color: C.green }}>{configured ? money(amt) : '—'}</div>
+                  <div style={{ fontSize: 11, color: C.muted2 }}>{payRateLabel(t)}</div>
                 </div>
               </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
+                {tiles.map(tile => {
+                  const n = countIn(t, tile.from);
+                  return (
+                    <div key={tile.l} style={{ flex: 1, background: C.page, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '0.04em', color: C.faint, textTransform: 'uppercase' }}>{tile.l}</div>
+                      <div style={{ fontFamily: serif, fontSize: 19, color: configured ? C.green : C.faint, marginTop: 2 }}>{configured ? money(payIn(t, tile.from)) : '—'}</div>
+                      <div style={{ fontSize: 9.5, color: C.muted2, marginTop: 1 }}>{n} lesson{n === 1 ? '' : 's'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
               {canViewBilling && (
-                <button onClick={() => setEdit(t)} style={{ ...chip, marginTop: 10 }}>{t.pay_type ? 'Edit pay' : 'Set pay'}</button>
+                <button onClick={() => setEdit(t)} style={{ ...chip, marginTop: 11 }}>{t.pay_type ? 'Edit pay' : 'Set pay'}</button>
               )}
             </Card>
           );
@@ -761,7 +773,7 @@ function Pay() {
       </div>
 
       <div style={{ fontSize: 11, color: C.muted2, marginTop: 12, lineHeight: 1.5 }}>
-        Totals count lessons assigned to each trainer in the selected period. Set each person's pay type (per lesson, hourly, or a percentage of the lesson fee).
+        Each figure counts lessons assigned to the trainer in that period (week starts Sunday, month and year to date). Set each person's pay type — per lesson, hourly, or a percentage of the lesson fee.
       </div>
 
       {edit && <PayConfigModal staff={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
