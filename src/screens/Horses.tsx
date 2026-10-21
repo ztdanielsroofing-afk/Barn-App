@@ -4,22 +4,35 @@ import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
-import { Horse, TrainingSession, Vaccine, CriticalNote } from '../types';
+import { Horse, TrainingSession, Vaccine, CriticalNote, Lesson } from '../types';
 import { useApp } from '../AppContext';
 import { Nav } from '../App';
 
 const careColor = (s: string) => ({ overdue: C.red, soon: C.gold, ok: C.green } as any)[s] || C.green;
 
 export default function Horses({ params }: { nav: Nav; params?: any }) {
-  const { isStaff, isClient, user, barn } = useApp();
+  const { isStaff, isClient, role, user, barn } = useApp();
   const { data: horses, reload } = useTable<Horse>('horses', q => q.order('name'));
+  // A trainer's "own" horses come from lessons they teach and training they log.
+  const { data: myLessons } = useTable<Lesson>('lessons', q => user?.id ? q.eq('trainer_id', user.id) : q.limit(0));
+  const { data: myTraining } = useTable<TrainingSession>('training_sessions', q => user?.id ? q.eq('trainer_id', user.id) : q.limit(0));
   const [openId, setOpenId] = useState<string | null>(params?.horseId || null);
+  // Clients and trainers default to their own horses, with a tab to see the whole barn.
+  const canFilterMine = isClient || role === 'trainer';
+  const [view, setView] = useState<'mine' | 'all'>(canFilterMine ? 'mine' : 'all');
 
   useEffect(() => { if (params?.horseId) setOpenId(params.horseId); }, [params?.horseId]);
 
-  const visible = isClient
-    ? horses.filter(h => h.barn_owned || h.owner_family_id === user?.family_id)
-    : horses;
+  const isMine = (h: Horse): boolean => {
+    if (isClient) return h.owner_family_id === user?.family_id;
+    if (role === 'trainer') {
+      const names = new Set(myLessons.map(l => l.horse_name).filter(Boolean));
+      const ids = new Set(myTraining.map(t => t.horse_id));
+      return ids.has(h.id) || names.has(h.name);
+    }
+    return true;
+  };
+  const visible = canFilterMine && view === 'mine' ? horses.filter(isMine) : horses;
 
   const open = openId ? horses.find(h => h.id === openId) : null;
   if (open) return <HorseDetail horse={open} onBack={() => { setOpenId(null); reload(); }} canEdit={isStaff} />;
@@ -36,6 +49,16 @@ export default function Horses({ params }: { nav: Nav; params?: any }) {
   return (
     <Page>
       <div style={{ fontFamily: serif, fontSize: 27, color: C.navy, marginBottom: 12 }}>{isClient ? 'Horses' : 'The Barn'}</div>
+      {canFilterMine && (
+        <div style={{ display: 'flex', gap: 6, background: '#fff', borderRadius: 12, padding: 4, marginBottom: 12 }}>
+          {([['mine', isClient ? 'My horses' : 'My horses'], ['all', 'All barn']] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setView(v)} style={{
+              flex: 1, border: 'none', borderRadius: 9, padding: '9px 4px', fontSize: 12.5, fontWeight: 700,
+              background: view === v ? C.navy : 'transparent', color: view === v ? '#fff' : C.muted,
+            }}>{l}</button>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {visible.map(h => (
           <Card key={h.id} onClick={() => setOpenId(h.id)} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -50,7 +73,13 @@ export default function Horses({ params }: { nav: Nav; params?: any }) {
             <Pill color={careColor(h.care_level)}>{h.care_level}</Pill>
           </Card>
         ))}
-        {visible.length === 0 && <Empty>No horses yet.</Empty>}
+        {visible.length === 0 && (
+          <Empty>
+            {canFilterMine && view === 'mine'
+              ? (isClient ? 'No horse on file for you yet. Tap “All barn” to see the barn’s horses.' : 'No horses assigned to you yet. Tap “All barn” to see every horse.')
+              : 'No horses yet.'}
+          </Empty>
+        )}
       </div>
       {isStaff && <div style={{ marginTop: 14 }}><Button kind="soft" onClick={addHorse}>+ Add a horse</Button></div>}
     </Page>
