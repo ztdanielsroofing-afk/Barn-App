@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { C, serif } from '../theme';
-import { Card, SectionLabel, Pill, Button } from '../ui';
+import { Card, SectionLabel, Pill, Button, useScrollLock, sheetPanel } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
@@ -170,6 +170,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   const [repeat, setRepeat] = useState(false);
   const [weeks, setWeeks] = useState('12');
   const [busy, setBusy] = useState(false);
+  useScrollLock();
 
   const ready = people.length > 0;
   const dowName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getDay()];
@@ -221,7 +222,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Add a lesson</div>
         <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>{day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
 
@@ -435,6 +436,7 @@ function RequestSheet({ onClose }: { onClose: () => void }) {
   const [reason, setReason] = useState('');
   const [pref, setPref] = useState('');
   const [sent, setSent] = useState(false);
+  useScrollLock();
 
   const picksLesson = kind === 'Reschedule' || kind === 'Cancel';
   const isFreeRide = kind === 'Free ride';
@@ -458,7 +460,7 @@ function RequestSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '88vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         {sent ? (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 8 }}>Request sent ✓</div>

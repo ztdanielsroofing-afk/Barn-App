@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { C, serif, money, BRAND_OPTIONS } from '../theme';
-import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty, Icon, ICONS, H } from '../ui';
+import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty, Icon, ICONS, H, useScrollLock, sheetPanel } from '../ui';
 import { supabase } from '../supabase';
 import { useApp } from '../AppContext';
 import { useTable } from '../db';
@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 36
+        Signed in as {user?.email} · {role} · build 37
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -311,7 +311,7 @@ function EditFamilyModal({ family, onClose, onSaved }:
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 4 }}>Edit family</div>
         <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 6 }}>Fix the name or any details. The family can still fill in the rest when they register.</div>
         <div style={lbl}>Family name *</div>
@@ -385,7 +385,7 @@ function UpgradeToStaffModal({ family, barnId, riderCount, editorIsOwner, onClos
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         {done ? (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{ fontFamily: serif, fontSize: 24, color: C.green, marginBottom: 8 }}>Done ✓</div>
@@ -472,7 +472,7 @@ function InviteFamilyModal({ barnId, onClose, onSent }: { barnId?: string; onClo
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         {done ? (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{ fontFamily: serif, fontSize: 24, color: C.green, marginBottom: 8 }}>Invitation sent ✓</div>
@@ -662,7 +662,7 @@ function EditStaffModal({ staff, editorIsOwner, onClose, onSaved }:
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 4 }}>Edit team member</div>
         <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 8 }}>{staff.email}</div>
         <div style={lbl}>Name *</div>
@@ -728,7 +728,7 @@ function InviteStaffModal({ barnId, onClose, onSent }: { barnId?: string; onClos
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         {done ? (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{ fontFamily: serif, fontSize: 24, color: C.green, marginBottom: 8 }}>Invite sent ✓</div>
@@ -811,7 +811,7 @@ function AddTaskModal({ barnId, onClose, onSaved }: { barnId?: string; onClose: 
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 8 }}>Add a task</div>
         <div style={lbl}>Task *</div>
         <input style={inp} value={label} onChange={e => setLabel(e.target.value)} placeholder='e.g. Cold-hose left front 10 min' autoFocus />
@@ -1225,7 +1225,7 @@ function RecordPayoutModal({ staff, owed, history, onClose, onSaved }:
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 23, color: C.navy, marginBottom: 2 }}>Record payout — {staff.full_name || staff.email}</div>
         <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>{owed > 0.005 ? `${money(owed)} currently owed.` : 'All settled up.'} Log what you actually paid.</div>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Amount paid ($)</div>
@@ -1271,7 +1271,7 @@ function PayConfigModal({ staff, onClose, onSaved }: { staff: AppUser; onClose: 
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 23, color: C.navy, marginBottom: 2 }}>Pay for {staff.full_name || staff.email}</div>
         <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>How is this person paid?</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 12 }}>
@@ -1399,7 +1399,7 @@ function AddDocModal({ barnId, onClose, onSaved }: { barnId?: string; onClose: (
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 12 }}>Add a document</div>
         <input style={inp} placeholder='Title (e.g. "Liability Waiver 2026")' value={title} onChange={e => setTitle(e.target.value)} autoFocus />
         <textarea style={{ ...inp, minHeight: 180 }} placeholder="Paste the full document / waiver text here. Families will read this and sign it." value={body} onChange={e => setBody(e.target.value)} />

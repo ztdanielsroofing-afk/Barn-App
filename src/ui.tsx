@@ -1,5 +1,25 @@
-import { CSSProperties, ReactNode } from 'react';
+import { CSSProperties, ReactNode, useEffect } from 'react';
 import { C, serif } from './theme';
+
+// Lock the page behind a bottom-sheet so touch-scrolling the sheet doesn't
+// scroll the screen behind it. Call once at the top of a modal component.
+export function useScrollLock() {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+}
+
+// Style for a bottom-sheet's scrollable inner panel: caps height to the real
+// visible viewport and contains scrolling so it never chains to the page.
+export const sheetPanel: CSSProperties = {
+  background: C.page, width: '100%', maxWidth: 430,
+  borderTopLeftRadius: 26, borderTopRightRadius: 26,
+  padding: '22px 20px 34px',
+  maxHeight: '88dvh', overflowY: 'auto',
+  overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch',
+};
 
 export const ICONS: Record<string, string> = {
   home: 'M3 11.5l9-8 9 8M5 10v10h5v-6h4v6h5V10',

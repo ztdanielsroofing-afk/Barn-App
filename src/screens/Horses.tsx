@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { C, serif } from '../theme';
-import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty } from '../ui';
+import { Card, SectionLabel, Pill, Button, Avatar, Row, Empty, useScrollLock, sheetPanel } from '../ui';
 import { Page } from './Header';
 import { useTable } from '../db';
 import { supabase } from '../supabase';
@@ -200,6 +200,7 @@ function EditHorseModal({ horse, onClose, onSaved }: { horse: Horse; onClose: ()
   const [vaccines, setVaccines] = useState<Vaccine[]>(horse.vaccines || []);
   const [crit, setCrit] = useState<CriticalNote[]>(horse.critical_notes || []);
   const [busy, setBusy] = useState(false);
+  useScrollLock();
 
   async function save() {
     if (!name.trim()) { alert('Name is required.'); return; }
@@ -232,7 +233,7 @@ function EditHorseModal({ horse, onClose, onSaved }: { horse: Horse; onClose: ()
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '92vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Edit {horse.name}</div>
         <div style={{ fontSize: 12, color: C.muted2 }}>Change any detail below, then save once.</div>
 
@@ -371,6 +372,7 @@ function LogTrainingModal({ horse, barnId, trainerName, trainerId, onClose, onSa
   const [work, setWork] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  useScrollLock();
   const toggle = (w: string) => setWork(p => p.includes(w) ? p.filter(x => x !== w) : [...p, w]);
 
   async function save() {
@@ -385,7 +387,7 @@ function LogTrainingModal({ horse, barnId, trainerName, trainerId, onClose, onSa
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
         <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 2 }}>Log training — {horse.name}</div>
         <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>Record what you worked on; the owner can see it.</div>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Date</div>
