@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 32
+        Signed in as {user?.email} · {role} · build 33
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -150,8 +150,11 @@ function Clients({ nav: _nav }: { nav: Nav }) {
   async function delFamily(f: Family) {
     if (!confirm(`Delete the ${f.family_name}? This also removes their riders, lessons, and billing history.`)) return;
     if (!confirm('This permanently deletes the family and can’t be undone. Are you absolutely sure?')) return;
-    // Clean up everything tied to this family first so the delete never hits a
-    // foreign-key constraint. Each is wrapped so a missing column/table is skipped.
+    // Unlink any user account still pointing at this family (e.g. a staff member
+    // who was once a client) so the family delete doesn't hit a foreign-key block.
+    try { await supabase.from('users').update({ family_id: null }).eq('family_id', f.id); } catch { /* skip */ }
+    // Clean up everything else tied to this family first. Each is wrapped so a
+    // missing column/table is skipped.
     const deps = ['riders', 'charges', 'payments', 'arena_bookings', 'schedule_requests', 'signatures', 'notifications', 'lessons'];
     for (const t of deps) {
       try { await supabase.from(t).delete().eq('family_id', f.id); } catch { /* table may not have family_id */ }
