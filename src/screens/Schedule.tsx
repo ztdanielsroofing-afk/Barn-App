@@ -22,7 +22,7 @@ const riderTitle = (l: Lesson): string => {
 const WORK_TYPES = ['Flat work', 'Jumping', 'Groundwork', 'Dressage', 'Lunging', 'Trail', 'Other'];
 
 export default function Schedule({ nav: _nav }: { nav: Nav }) {
-  const { isStaff, isClient } = useApp();
+  const { isStaff, isClient, role, user } = useApp();
   const today = new Date();
   const [sel, setSel] = useState<Date>(today);
   const [view, setView] = useState<Date>(new Date(today.getFullYear(), today.getMonth(), 1));
@@ -30,8 +30,17 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
   const [req, setReq] = useState(false);
   const [adding, setAdding] = useState(false);
   const [mode, setMode] = useState<'lessons' | 'arena'>('lessons');
+  // Clients and trainers default to their own lessons, with a tab for the whole barn.
+  const canFilterMine = isClient || role === 'trainer';
+  const [scope, setScope] = useState<'mine' | 'all'>(canFilterMine ? 'mine' : 'all');
 
-  const { data: lessons, reload } = useTable<Lesson>('lessons', q => q.order('starts_at'));
+  const { data: allLessons, reload } = useTable<Lesson>('lessons', q => q.order('starts_at'));
+
+  const lessons = useMemo(() => {
+    if (!canFilterMine || scope === 'all') return allLessons;
+    if (isClient) return allLessons.filter(l => l.family_id === user?.family_id);
+    return allLessons.filter(l => l.trainer_id === user?.id);
+  }, [allLessons, canFilterMine, scope, isClient, user?.family_id, user?.id]);
 
   const byDay = useMemo(() => {
     const m: Record<string, Lesson[]> = {};
@@ -62,6 +71,17 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
           <button onClick={() => setView(new Date(view.getFullYear(), view.getMonth() + 1, 1))} style={navBtn}>›</button>
         </div>
       </div>
+
+      {canFilterMine && (
+        <div style={{ display: 'flex', gap: 6, background: '#fff', borderRadius: 12, padding: 4, marginBottom: 12 }}>
+          {([['mine', 'My lessons'], ['all', 'All barn']] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setScope(v)} style={{
+              flex: 1, border: 'none', borderRadius: 9, padding: '9px 4px', fontSize: 12.5, fontWeight: 700,
+              background: scope === v ? C.navy : 'transparent', color: scope === v ? '#fff' : C.muted,
+            }}>{l}</button>
+          ))}
+        </div>
+      )}
 
       <Card style={{ padding: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2, marginBottom: 4 }}>
@@ -110,7 +130,7 @@ export default function Schedule({ nav: _nav }: { nav: Nav }) {
         ))}
         {dayItems.length === 0 && (
           <div style={{ textAlign: 'center', color: C.muted2, fontSize: 13, padding: '18px 12px', background: 'rgba(255,255,255,0.5)', borderRadius: 14 }}>
-            No lessons this day.
+            {canFilterMine && scope === 'mine' ? 'None of your lessons this day. Tap “All barn” to see everyone’s.' : 'No lessons this day.'}
           </div>
         )}
       </div>
