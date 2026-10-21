@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 31
+        Signed in as {user?.email} · {role} · build 32
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -145,6 +145,7 @@ function Clients({ nav: _nav }: { nav: Nav }) {
   const [bill, setBill] = useState(false);
   const [adding, setAdding] = useState(false);
   const [upgrade, setUpgrade] = useState<Family | null>(null);
+  const [editFam, setEditFam] = useState<Family | null>(null);
 
   async function delFamily(f: Family) {
     if (!confirm(`Delete the ${f.family_name}? This also removes their riders, lessons, and billing history.`)) return;
@@ -178,8 +179,16 @@ function Clients({ nav: _nav }: { nav: Nav }) {
         onBack={() => { setOpen(null); reload(); }}
         onBilling={() => setBill(true)}
         onRemove={() => delFamily(open)}
+        onEdit={() => setEditFam(open)}
         onUpgrade={canManageStaff ? () => setUpgrade(open) : undefined}
       />
+      {editFam && (
+        <EditFamilyModal
+          family={editFam}
+          onClose={() => setEditFam(null)}
+          onSaved={(updated) => { setEditFam(null); setOpen(updated); reload(); }}
+        />
+      )}
       {upgrade && (
         <UpgradeToStaffModal
           family={upgrade}
@@ -217,11 +226,14 @@ function Clients({ nav: _nav }: { nav: Nav }) {
   );
 }
 
-function FamilyDetail({ family, riders, onBack, onBilling, onRemove, onUpgrade }:
-  { family: Family; riders: Rider[]; onBack: () => void; onBilling: () => void; onRemove: () => void; onUpgrade?: () => void }) {
+function FamilyDetail({ family, riders, onBack, onBilling, onRemove, onEdit, onUpgrade }:
+  { family: Family; riders: Rider[]; onBack: () => void; onBilling: () => void; onRemove: () => void; onEdit?: () => void; onUpgrade?: () => void }) {
   return (
     <>
-      <button onClick={onBack} style={backBtn}>‹ Clients</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <button onClick={onBack} style={backBtn}>‹ Clients</button>
+        {onEdit && <button onClick={onEdit} style={{ ...chip, padding: '8px 16px' }}>Edit</button>}
+      </div>
       <div style={{ fontFamily: serif, fontSize: 25, color: C.navy }}>{family.family_name}</div>
       <div style={{ fontSize: 12, color: C.muted2, marginBottom: 12 }}>
         {family.onboarded === false ? 'Invited — awaiting registration' : 'Registered family'}
@@ -260,6 +272,63 @@ function FamilyDetail({ family, riders, onBack, onBilling, onRemove, onUpgrade }
         <Button kind="ghost" onClick={onRemove} style={{ color: C.red }}>Remove family</Button>
       </div>
     </>
+  );
+}
+
+function EditFamilyModal({ family, onClose, onSaved }:
+  { family: Family; onClose: () => void; onSaved: (updated: Family) => void }) {
+  const [familyName, setFamilyName] = useState(family.family_name || '');
+  const [contact, setContact] = useState(family.contact_name || '');
+  const [email, setEmail] = useState(family.email || '');
+  const [phone, setPhone] = useState(family.phone || '');
+  const [address, setAddress] = useState(family.home_address || '');
+  const [emergency, setEmergency] = useState(family.emergency_contact || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function save() {
+    if (!familyName.trim()) { setErr('Family name is required.'); return; }
+    setErr(''); setBusy(true);
+    const patch = {
+      family_name: familyName.trim(),
+      contact_name: contact.trim() || null,
+      email: email.trim().toLowerCase() || null,
+      phone: phone.trim() || null,
+      home_address: address.trim() || null,
+      emergency_contact: emergency.trim() || null,
+    };
+    const { error } = await supabase.from('families').update(patch).eq('id', family.id);
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    onSaved({ ...family, ...patch } as Family);
+  }
+
+  const inp: React.CSSProperties = { width: '100%', border: `1px solid ${C.page}`, borderRadius: 12, padding: '13px 14px', fontSize: 15, background: '#fff', outline: 'none', marginBottom: 4, fontFamily: 'inherit', boxSizing: 'border-box' };
+  const lbl: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, color: C.muted, margin: '10px 0 5px' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ fontFamily: serif, fontSize: 24, color: C.navy, marginBottom: 4 }}>Edit family</div>
+        <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 6 }}>Fix the name or any details. The family can still fill in the rest when they register.</div>
+        <div style={lbl}>Family name *</div>
+        <input style={inp} value={familyName} onChange={e => setFamilyName(e.target.value)} placeholder="e.g. Reyes family" autoFocus />
+        <div style={lbl}>Main contact</div>
+        <input style={inp} value={contact} onChange={e => setContact(e.target.value)} placeholder="Parent / contact name" />
+        <div style={lbl}>Email</div>
+        <input style={inp} value={email} onChange={e => setEmail(e.target.value)} inputMode="email" autoCapitalize="none" placeholder="name@email.com" />
+        <div style={{ fontSize: 10.5, color: C.muted2, margin: '0 2px 4px' }}>Note: changing this does not change the email their sign-in link was sent to.</div>
+        <div style={lbl}>Phone</div>
+        <input style={inp} value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" placeholder="(555) 555-5555" />
+        <div style={lbl}>Home address</div>
+        <input style={inp} value={address} onChange={e => setAddress(e.target.value)} placeholder="Street, city" />
+        <div style={lbl}>Emergency contact</div>
+        <input style={inp} value={emergency} onChange={e => setEmergency(e.target.value)} placeholder="Name & phone" />
+        {err && <div style={{ color: C.red, fontSize: 12.5, margin: '10px 2px 0', fontWeight: 600 }}>{err}</div>}
+        <Button disabled={busy} onClick={save} style={{ marginTop: 16 }}>{busy ? 'Saving…' : 'Save changes'}</Button>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 
