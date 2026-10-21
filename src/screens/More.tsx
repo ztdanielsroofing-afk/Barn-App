@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 29
+        Signed in as {user?.email} · {role} · build 30
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -253,22 +253,31 @@ function InviteFamilyModal({ barnId, onClose, onSent }: { barnId?: string; onClo
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [warn, setWarn] = useState('');
   const [done, setDone] = useState('');
 
   const emailOk = /\S+@\S+\.\S+/.test(email.trim());
   const ready = name.trim().length > 0 && emailOk;
 
-  async function send() {
-    setErr(''); setBusy(true);
+  async function send(force = false) {
+    setErr('');
+    const addr = email.trim().toLowerCase();
+    if (!force) {
+      setBusy(true);
+      const conflict = await emailConflicts(addr);
+      setBusy(false);
+      if (conflict) { setWarn(`${conflict} Inviting them as a family too may create a duplicate — only continue if this is genuinely the same person in a second role.`); return; }
+    }
+    setWarn(''); setBusy(true);
     try {
       const famName = /family$/i.test(name.trim()) ? name.trim() : `${name.trim()} family`;
       const { data: fam, error } = await supabase.from('families')
-        .insert({ barn_id: barnId, family_name: famName, email: email.trim().toLowerCase(), status: 'current', onboarded: false })
+        .insert({ barn_id: barnId, family_name: famName, email: addr, status: 'current', onboarded: false })
         .select('id').single();
       if (error || !fam) throw new Error(error?.message || 'Could not create the family.');
-      const res = await sendInvite({ email: email.trim(), role: 'client', barn_id: barnId, full_name: famName, family_id: fam.id });
+      const res = await sendInvite({ email: addr, role: 'client', barn_id: barnId, full_name: famName, family_id: fam.id });
       if (!res.ok) throw new Error(res.error || 'The invite email failed to send.');
-      setDone(`Invitation sent to ${email.trim()}. They'll get an email with a link to register.`);
+      setDone(`Invitation sent to ${addr}. They'll get an email with a link to register.`);
     } catch (e: any) {
       setErr(e.message || 'Something went wrong.');
     } finally {
@@ -297,8 +306,18 @@ function InviteFamilyModal({ barnId, onClose, onSent }: { barnId?: string; onClo
             <div style={lbl}>Email address *</div>
             <input style={inp} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" inputMode="email" autoCapitalize="none" />
             {err && <div style={{ color: C.red, fontSize: 12.5, margin: '10px 2px 0', fontWeight: 600 }}>{err}</div>}
-            <Button disabled={!ready || busy} onClick={send} style={{ marginTop: 16 }}>{busy ? 'Sending…' : 'Send invitation'}</Button>
-            <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+            {warn ? (
+              <div style={{ marginTop: 14, background: C.goldTint, border: `1px solid ${C.gold}55`, borderRadius: 12, padding: 13 }}>
+                <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.5, marginBottom: 10 }}>⚠ {warn}</div>
+                <Button disabled={busy} onClick={() => send(true)}>{busy ? 'Sending…' : 'Add anyway'}</Button>
+                <Button kind="ghost" onClick={() => setWarn('')} style={{ marginTop: 8 }}>Go back</Button>
+              </div>
+            ) : (
+              <>
+                <Button disabled={!ready || busy} onClick={() => send()} style={{ marginTop: 16 }}>{busy ? 'Checking…' : 'Send invitation'}</Button>
+                <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+              </>
+            )}
           </>
         )}
       </div>
@@ -492,17 +511,26 @@ function InviteStaffModal({ barnId, onClose, onSent }: { barnId?: string; onClos
   const [chosen, setChosen] = useState<Role>('trainer');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [warn, setWarn] = useState('');
   const [done, setDone] = useState('');
 
   const emailOk = /\S+@\S+\.\S+/.test(email.trim());
   const ready = name.trim().length > 0 && emailOk;
 
-  async function send() {
-    setErr(''); setBusy(true);
+  async function send(force = false) {
+    setErr('');
+    const addr = email.trim().toLowerCase();
+    if (!force) {
+      setBusy(true);
+      const conflict = await emailConflicts(addr);
+      setBusy(false);
+      if (conflict) { setWarn(`${conflict} Adding them as a team member too may create a duplicate — only continue if this is genuinely the same person in a second role.`); return; }
+    }
+    setWarn(''); setBusy(true);
     try {
-      const res = await sendInvite({ email: email.trim(), role: chosen, barn_id: barnId, full_name: name.trim() });
+      const res = await sendInvite({ email: addr, role: chosen, barn_id: barnId, full_name: name.trim() });
       if (!res.ok) throw new Error(res.error || 'The invite email failed to send.');
-      setDone(`Invite emailed to ${email.trim()} as ${chosen.replace('_', ' ')}. When they open the link they're added to the barn.`);
+      setDone(`Invite emailed to ${addr} as ${chosen.replace('_', ' ')}. When they open the link they're added to the barn.`);
     } catch (e: any) {
       setErr(e.message || 'Something went wrong.');
     } finally { setBusy(false); }
@@ -546,13 +574,40 @@ function InviteStaffModal({ barnId, onClose, onSent }: { barnId?: string; onClos
               ))}
             </div>
             {err && <div style={{ color: C.red, fontSize: 12.5, margin: '10px 2px 0', fontWeight: 600 }}>{err}</div>}
-            <Button disabled={!ready || busy} onClick={send} style={{ marginTop: 16 }}>{busy ? 'Sending…' : 'Send invite'}</Button>
-            <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+            {warn ? (
+              <div style={{ marginTop: 14, background: C.goldTint, border: `1px solid ${C.gold}55`, borderRadius: 12, padding: 13 }}>
+                <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.5, marginBottom: 10 }}>⚠ {warn}</div>
+                <Button disabled={busy} onClick={() => send(true)}>{busy ? 'Sending…' : 'Add anyway'}</Button>
+                <Button kind="ghost" onClick={() => setWarn('')} style={{ marginTop: 8 }}>Go back</Button>
+              </div>
+            ) : (
+              <>
+                <Button disabled={!ready || busy} onClick={() => send()} style={{ marginTop: 16 }}>{busy ? 'Checking…' : 'Send invite'}</Button>
+                <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+              </>
+            )}
           </>
         )}
       </div>
     </div>
   );
+}
+
+// Returns a human message if this email already belongs to a family or a staff
+// account in the barn, else null — used to warn before creating a duplicate.
+async function emailConflicts(addr: string): Promise<string | null> {
+  const [{ data: fams }, { data: usrs }] = await Promise.all([
+    supabase.from('families').select('id').ilike('email', addr),
+    supabase.from('users').select('id,role').ilike('email', addr),
+  ]);
+  const asFam = (fams || []).length > 0;
+  const asStaff = (usrs || []).some((u: any) => u.role && u.role !== 'client');
+  const asClientUser = (usrs || []).some((u: any) => u.role === 'client');
+  if (!asFam && !asStaff && !asClientUser) return null;
+  const roles: string[] = [];
+  if (asFam || asClientUser) roles.push('a family / client');
+  if (asStaff) roles.push('a team member');
+  return `This email is already in the barn as ${roles.join(' and ')}.`;
 }
 
 function AddTaskModal({ barnId, onClose, onSaved }: { barnId?: string; onClose: () => void; onSaved: () => void }) {
