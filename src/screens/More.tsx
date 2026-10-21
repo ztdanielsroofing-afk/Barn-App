@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 30
+        Signed in as {user?.email} · {role} · build 31
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -136,7 +136,7 @@ function SignOut() {
 
 /* ---------------- Clients & Families ---------------- */
 function Clients({ nav: _nav }: { nav: Nav }) {
-  const { canEditBilling, barn } = useApp();
+  const { canEditBilling, canManageStaff, role, barn } = useApp();
   const { data: families, reload } = useTable<Family>('families', q => q.order('family_name'));
   const { data: charges, reload: reloadC } = useTable<Charge>('charges');
   const { data: payments, reload: reloadP } = useTable<Payment>('payments');
@@ -144,6 +144,7 @@ function Clients({ nav: _nav }: { nav: Nav }) {
   const [open, setOpen] = useState<Family | null>(null);
   const [bill, setBill] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [upgrade, setUpgrade] = useState<Family | null>(null);
 
   async function delFamily(f: Family) {
     if (!confirm(`Delete the ${f.family_name}? This also removes their riders, lessons, and billing history.`)) return;
@@ -170,13 +171,26 @@ function Clients({ nav: _nav }: { nav: Nav }) {
     />
   );
   if (open) return (
-    <FamilyDetail
-      family={open}
-      riders={riders.filter(r => r.family_id === open.id)}
-      onBack={() => { setOpen(null); reload(); }}
-      onBilling={() => setBill(true)}
-      onRemove={() => delFamily(open)}
-    />
+    <>
+      <FamilyDetail
+        family={open}
+        riders={riders.filter(r => r.family_id === open.id)}
+        onBack={() => { setOpen(null); reload(); }}
+        onBilling={() => setBill(true)}
+        onRemove={() => delFamily(open)}
+        onUpgrade={canManageStaff ? () => setUpgrade(open) : undefined}
+      />
+      {upgrade && (
+        <UpgradeToStaffModal
+          family={upgrade}
+          barnId={barn?.id}
+          riderCount={riders.filter(r => r.family_id === upgrade.id).length}
+          editorIsOwner={role === 'owner'}
+          onClose={() => setUpgrade(null)}
+          onDone={() => { setUpgrade(null); setOpen(null); reload(); }}
+        />
+      )}
+    </>
   );
   return (
     <>
@@ -203,8 +217,8 @@ function Clients({ nav: _nav }: { nav: Nav }) {
   );
 }
 
-function FamilyDetail({ family, riders, onBack, onBilling, onRemove }:
-  { family: Family; riders: Rider[]; onBack: () => void; onBilling: () => void; onRemove: () => void }) {
+function FamilyDetail({ family, riders, onBack, onBilling, onRemove, onUpgrade }:
+  { family: Family; riders: Rider[]; onBack: () => void; onBilling: () => void; onRemove: () => void; onUpgrade?: () => void }) {
   return (
     <>
       <button onClick={onBack} style={backBtn}>‹ Clients</button>
@@ -242,9 +256,102 @@ function FamilyDetail({ family, riders, onBack, onBilling, onRemove }:
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 16 }}>
         <Button kind="soft" onClick={onBilling}>View billing</Button>
+        {onUpgrade && <Button kind="soft" onClick={onUpgrade}>Upgrade to team member →</Button>}
         <Button kind="ghost" onClick={onRemove} style={{ color: C.red }}>Remove family</Button>
       </div>
     </>
+  );
+}
+
+function UpgradeToStaffModal({ family, barnId, riderCount, editorIsOwner, onClose, onDone }:
+  { family: Family; barnId?: string; riderCount: number; editorIsOwner: boolean; onClose: () => void; onDone: () => void }) {
+  const [chosen, setChosen] = useState<Role>('trainer');
+  const [removeFam, setRemoveFam] = useState(riderCount === 0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState('');
+
+  const ROLES: { v: Role; l: string; d: string }[] = [
+    { v: 'trainer', l: 'Trainer', d: 'Teaches lessons, logs training' },
+    { v: 'head_trainer', l: 'Head trainer', d: 'Trainer + manages schedule & staff' },
+    ...(editorIsOwner ? [{ v: 'owner' as Role, l: 'Owner', d: 'Full access, including billing' }] : []),
+  ];
+
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      // Find any registered account(s) tied to this family.
+      const { data: usrs, error: uErr } = await supabase.from('users').select('id,role').eq('family_id', family.id);
+      if (uErr) throw new Error(uErr.message);
+      let msg = '';
+      if (usrs && usrs.length) {
+        const patch: any = { role: chosen };
+        if (removeFam) patch.family_id = null;
+        const { error } = await supabase.from('users').update(patch).eq('family_id', family.id);
+        if (error) throw new Error(error.message);
+        msg = `${family.contact_name || family.family_name} is now a ${chosen.replace('_', ' ')}.`;
+      } else {
+        // Not registered yet — email them a staff invite instead.
+        if (!family.email) throw new Error('No account and no email on file. Add a team member directly from Staff instead.');
+        const res = await sendInvite({ email: family.email, role: chosen, barn_id: barnId, full_name: family.contact_name || family.family_name });
+        if (!res.ok) throw new Error(res.error || 'Invite failed.');
+        msg = `They haven't signed in yet, so a ${chosen.replace('_', ' ')} invite was emailed to ${family.email}. They become staff when they open it.`;
+      }
+      if (removeFam) {
+        const deps = ['riders', 'charges', 'payments', 'arena_bookings', 'schedule_requests', 'signatures', 'notifications', 'lessons'];
+        for (const t of deps) { try { await supabase.from(t).delete().eq('family_id', family.id); } catch { /* skip */ } }
+        await supabase.from('families').delete().eq('id', family.id);
+      }
+      setDone(msg);
+    } catch (e: any) {
+      setErr(e.message || 'Something went wrong.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.page, width: '100%', maxWidth: 430, borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: '22px 20px 30px', maxHeight: '90vh', overflowY: 'auto' }}>
+        {done ? (
+          <div style={{ textAlign: 'center', padding: '16px 0' }}>
+            <div style={{ fontFamily: serif, fontSize: 24, color: C.green, marginBottom: 8 }}>Done ✓</div>
+            <p style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.6 }}>{done}</p>
+            <Button onClick={onDone} style={{ marginTop: 14 }}>Close</Button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontFamily: serif, fontSize: 23, color: C.navy, marginBottom: 4 }}>Upgrade to team member</div>
+            <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 10, lineHeight: 1.5 }}>Make <b>{family.contact_name || family.family_name}</b> part of the staff. Pick their role:</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {ROLES.map(r => (
+                <button key={r.v} onClick={() => setChosen(r.v)} style={{
+                  textAlign: 'left', border: chosen === r.v ? `2px solid ${C.navy}` : `1px solid ${C.page}`, borderRadius: 12,
+                  padding: '11px 13px', background: chosen === r.v ? C.infoBg : '#fff', cursor: 'pointer',
+                }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{r.l}</div>
+                  <div style={{ fontSize: 11, color: C.muted2 }}>{r.d}</div>
+                </button>
+              ))}
+            </div>
+
+            <Card style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: C.text, paddingRight: 10 }}>Also remove their client / family record</span>
+              <input type="checkbox" checked={removeFam} onChange={e => setRemoveFam(e.target.checked)} style={{ width: 20, height: 20, flex: 'none' }} />
+            </Card>
+            <div style={{ fontSize: 11, color: C.muted2, marginTop: 6, lineHeight: 1.4 }}>
+              {removeFam
+                ? (riderCount > 0
+                  ? `⚠ This family has ${riderCount} rider${riderCount === 1 ? '' : 's'} and billing history that will be deleted. Leave this off if they're also a client (e.g. their child still rides).`
+                  : 'Removes the empty client entry so they only appear as staff.')
+                : 'Keeps their client/family record too — use this if they are both a staff member and a client (e.g. a parent whose child rides).'}
+            </div>
+
+            {err && <div style={{ color: C.red, fontSize: 12.5, margin: '12px 2px 0', fontWeight: 600 }}>{err}</div>}
+            <Button disabled={busy} onClick={save} style={{ marginTop: 16 }}>{busy ? 'Working…' : 'Upgrade to ' + chosen.replace('_', ' ')}</Button>
+            <Button kind="ghost" onClick={onClose} style={{ marginTop: 10 }}>Cancel</Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
