@@ -127,7 +127,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 33
+        Signed in as {user?.email} · {role} · build 34
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -361,6 +361,9 @@ function UpgradeToStaffModal({ family, barnId, riderCount, editorIsOwner, onClos
         if (removeFam) patch.family_id = null;
         const { error } = await supabase.from('users').update(patch).eq('family_id', family.id);
         if (error) throw new Error(error.message);
+        // Accept any stale client invites for this email so a later login can't
+        // flip them back to a client.
+        if (family.email) { try { await supabase.from('invites').update({ accepted: true }).ilike('email', family.email); } catch { /* best effort */ } }
         msg = `${family.contact_name || family.family_name} is now a ${chosen.replace('_', ' ')}.`;
       } else {
         // Not registered yet — email them a staff invite instead.
