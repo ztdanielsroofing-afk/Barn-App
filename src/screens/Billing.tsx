@@ -66,17 +66,25 @@ export default function Billing({ nav: _nav }: { nav: Nav }) {
       }
       if (any) await notify({ barn_id: f.barn_id, family_id: f.id, kind: 'billing', title: 'New charges posted', body: 'Open My Bill to see your balance and pay.' });
     }
-    // per-lesson families: bill any priced lesson not yet charged
+    // per-lesson families: bill any priced lesson not yet charged. For a group
+    // lesson, charge EACH participating per-lesson family (once each).
     for (const l of lessons) {
-      if (!l.family_id || !l.fee || Number(l.fee) <= 0) continue;
-      const fam = families.find(f => f.id === l.family_id);
-      if (fam?.billing_mode !== 'per_lesson') continue;
-      if (charges.some(c => c.lesson_id === l.id)) continue;
-      await supabase.from('charges').insert({
-        barn_id: fam.barn_id, family_id: fam.id, lesson_id: l.id, amount: Number(l.fee),
-        label: `Lesson — ${new Date(l.starts_at).toLocaleDateString()}${l.rider_name ? ` (${l.rider_name})` : ''}`,
-      });
-      added++;
+      if (!l.fee || Number(l.fee) <= 0) continue;
+      const parts = (l.participants && l.participants.length
+        ? l.participants
+        : (l.family_id ? [{ name: l.rider_name || '', family_id: l.family_id }] : []));
+      const famIds = [...new Set(parts.map((p: any) => p.family_id).filter(Boolean) as string[])];
+      for (const fid of famIds) {
+        const fam = families.find(f => f.id === fid);
+        if (fam?.billing_mode !== 'per_lesson') continue;
+        if (charges.some(c => c.lesson_id === l.id && c.family_id === fid)) continue;
+        const who = parts.find((p: any) => p.family_id === fid)?.name;
+        await supabase.from('charges').insert({
+          barn_id: fam.barn_id, family_id: fam.id, lesson_id: l.id, amount: Number(l.fee),
+          label: `Lesson — ${new Date(l.starts_at).toLocaleDateString()}${who ? ` (${who})` : ''}`,
+        });
+        added++;
+      }
     }
     setBusy(false);
     setMsg(added ? `Posted ${added} new charge${added > 1 ? 's' : ''}.` : 'Everything was already up to date.');

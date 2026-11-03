@@ -290,23 +290,64 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   );
 }
 
+type Participant = { name: string; family_id: string | null; horse_name?: string | null };
+
 function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }) {
   const { isStaff } = useApp();
   const { data: horses } = useTable<Horse>('horses', q => q.order('name'));
+  const { data: roster } = useTable<Rider>('riders', q => q.order('full_name'));
   const [notes, setNotes] = useState(lesson.notes || '');
   const [work, setWork] = useState<string[]>(lesson.work_types || []);
-  const [horseName, setHorseName] = useState(lesson.horse_name || '');
+  // Riders (with each one's own horse) are the source of truth; fall back to the
+  // single rider_name/horse_name for older lessons.
+  const [people, setPeople] = useState<Participant[]>(() => {
+    if (lesson.participants && lesson.participants.length) {
+      const mapped = lesson.participants.map(p => ({ name: p.name, family_id: p.family_id ?? null, horse_name: p.horse_name ?? null }));
+      // Seed the first rider from a lesson-level horse chosen at creation, if none set.
+      if (!mapped.some(p => p.horse_name) && lesson.horse_name) mapped[0].horse_name = lesson.horse_name;
+      return mapped;
+    }
+    return [{ name: lesson.rider_name || 'Rider', family_id: lesson.family_id ?? null, horse_name: lesson.horse_name ?? null }];
+  });
+  const [addOpen, setAddOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const toggleWork = (w: string) => setWork(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
+  const isGroup = people.length > 1;
 
-  async function changeHorse(name: string) {
-    const next = horseName === name ? '' : name;  // tap again to unassign
-    setHorseName(next);
-    await supabase.from('lessons').update({ horse_name: next || null }).eq('id', lesson.id);
+  // Persist the rider list + each rider's horse. Keep the single horse_name field
+  // as a readable summary so the calendar/home still show something sensible.
+  async function savePeople(next: Participant[]) {
+    setPeople(next);
+    const uniqueHorses = [...new Set(next.map(p => p.horse_name).filter(Boolean) as string[])];
+    await supabase.from('lessons').update({
+      participants: next,
+      rider_name: next[0]?.name || null,
+      horse_name: uniqueHorses.join(', ') || null,
+      lesson_type: next.length > 1 && lesson.lesson_type === 'Private' ? 'Group' : lesson.lesson_type,
+    }).eq('id', lesson.id);
+  }
+  function changeHorse(i: number, name: string) {
+    const next = people.map((p, j) => j === i ? { ...p, horse_name: p.horse_name === name ? null : name } : p);
+    savePeople(next);
+  }
+  function addRiderFromRoster(r: Rider) {
+    if (people.some(p => p.name === r.full_name)) { setAddOpen(false); return; }
+    savePeople([...people, { name: r.full_name, family_id: r.family_id ?? null, horse_name: null }]);
+    setAddOpen(false);
+  }
+  function addManualRider(name: string) {
+    if (!name.trim() || people.some(p => p.name === name.trim())) { setAddOpen(false); return; }
+    savePeople([...people, { name: name.trim(), family_id: null, horse_name: null }]);
+    setAddOpen(false);
+  }
+  function removeRider(i: number) {
+    if (people.length <= 1) return;
+    savePeople(people.filter((_, j) => j !== i));
   }
   async function saveNotes() {
     await supabase.from('lessons').update({ notes, work_types: work, status: 'completed' }).eq('id', lesson.id);
-    await autoChargeLesson(lesson);
+    // Charge from the freshest participant list (what's on screen now).
+    await autoChargeLesson({ ...lesson, participants: people, horse_name: lesson.horse_name });
     setSaved(true);
   }
   async function del() {
@@ -314,51 +355,49 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
     await supabase.from('lessons').delete().eq('id', lesson.id);
     onBack();
   }
-  async function addRider() {
-    const name = prompt('Add a rider to this lesson:'); if (!name || !name.trim()) return;
-    const current = lesson.participants && lesson.participants.length
-      ? lesson.participants
-      : (lesson.rider_name ? [{ name: lesson.rider_name, family_id: lesson.family_id || null }] : []);
-    const next = [...current, { name: name.trim(), family_id: null }];
-    await supabase.from('lessons').update({
-      participants: next,
-      rider_name: next[0].name,
-      lesson_type: lesson.lesson_type === 'Private' ? 'Group' : lesson.lesson_type,
-    }).eq('id', lesson.id);
-    onBack();
-  }
 
   return (
     <Page>
       <button onClick={onBack} style={{ background: '#fff', border: 'none', borderRadius: 11, padding: '8px 13px', fontSize: 12, fontWeight: 700, color: C.navy, marginBottom: 12 }}>‹ Schedule</button>
-      <div style={{ fontFamily: serif, fontSize: 25, color: C.navy }}>{lesson.lesson_type} lesson</div>
+      <div style={{ fontFamily: serif, fontSize: 25, color: C.navy }}>{isGroup ? 'Group' : lesson.lesson_type} lesson</div>
       <div style={{ fontSize: 12, color: C.muted2, marginBottom: 12 }}>
-        {new Date(lesson.starts_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {lesson.time_label}
+        {new Date(lesson.starts_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {lesson.time_label}{lesson.trainer_name ? ` · ${lesson.trainer_name}` : ''}
       </div>
-      <Card>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted, marginBottom: 4 }}>Rider{riderNames(lesson).length > 1 ? 's' : ''}</div>
-        {riderNames(lesson).map((n, i) => (
-          <div key={i} style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{n}</div>
+
+      <SectionLabel>{isGroup ? `Riders & horses (${people.length})` : 'Rider & horse'}</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {people.map((p, i) => (
+          <Card key={i}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>
+                {p.name}
+                {!p.family_id && <span style={{ fontSize: 10.5, color: C.gold, fontWeight: 700, marginLeft: 6 }}>· no family (won't be billed)</span>}
+              </div>
+              {isStaff && isGroup && <button onClick={() => removeRider(i)} style={{ background: C.redBg, color: C.red, border: 'none', borderRadius: 8, padding: '4px 9px', fontSize: 11, fontWeight: 700 }}>Remove</button>}
+            </div>
+            {isStaff ? (
+              horses.length === 0
+                ? <div style={{ fontSize: 12, color: C.muted2, marginTop: 8 }}>No horses in the barn yet — add them under the Horses tab.</div>
+                : (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
+                    {horses.map(h => (
+                      <button key={h.id} onClick={() => changeHorse(i, h.name)} style={{
+                        border: 'none', borderRadius: 16, padding: '7px 11px', fontSize: 11.5, fontWeight: 700,
+                        background: p.horse_name === h.name ? C.navy : C.page, color: p.horse_name === h.name ? '#fff' : C.navy,
+                      }}>{h.name}</button>
+                    ))}
+                  </div>
+                )
+            ) : (
+              <div style={{ fontSize: 12, color: C.muted2, marginTop: 6 }}>Horse: {p.horse_name || '—'}</div>
+            )}
+          </Card>
         ))}
-        <div style={{ fontSize: 12, color: C.muted2, marginTop: 8 }}>Horse: {horseName || '—'}{lesson.trainer_name ? ` · Trainer: ${lesson.trainer_name}` : ''}</div>
-      </Card>
+      </div>
 
       {isStaff && (
         <>
-          <div style={{ marginTop: 12 }}><Button kind="soft" onClick={addRider}>+ Add another rider (group)</Button></div>
-          <SectionLabel>Assign horse {horseName ? `· ${horseName}` : ''}</SectionLabel>
-          {horses.length === 0
-            ? <div style={{ fontSize: 12.5, color: C.muted2 }}>No horses in the barn yet — add them under the Horses tab.</div>
-            : (
-              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-                {horses.map(h => (
-                  <button key={h.id} onClick={() => changeHorse(h.name)} style={{
-                    border: 'none', borderRadius: 18, padding: '8px 12px', fontSize: 12, fontWeight: 700,
-                    background: horseName === h.name ? C.navy : '#fff', color: horseName === h.name ? '#fff' : C.navy,
-                  }}>{h.name}</button>
-                ))}
-              </div>
-            )}
+          <div style={{ marginTop: 11 }}><Button kind="soft" onClick={() => setAddOpen(true)}>+ Add another rider (group)</Button></div>
 
           <SectionLabel>What did you work on?</SectionLabel>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -390,7 +429,45 @@ function LessonDetail({ lesson, onBack }: { lesson: Lesson; onBack: () => void }
           </Card>
         </>
       )}
+
+      {addOpen && (
+        <AddRiderSheet
+          roster={roster.filter(r => !people.some(p => p.name === r.full_name))}
+          onPick={addRiderFromRoster}
+          onManual={addManualRider}
+          onClose={() => setAddOpen(false)}
+        />
+      )}
     </Page>
+  );
+}
+
+function AddRiderSheet({ roster, onPick, onManual, onClose }:
+  { roster: Rider[]; onPick: (r: Rider) => void; onManual: (name: string) => void; onClose: () => void }) {
+  const [manual, setManual] = useState('');
+  useScrollLock();
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,21,48,0.5)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={sheetPanel}>
+        <div style={{ fontFamily: serif, fontSize: 23, color: C.navy, marginBottom: 2 }}>Add a rider</div>
+        <div style={{ fontSize: 12, color: C.muted2, marginBottom: 14 }}>Pick from your riders so they're billed with the group. Typed-in names aren't linked to a family and won't be charged.</div>
+        {roster.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
+            {roster.map(r => (
+              <button key={r.id} onClick={() => onPick(r)} style={{ textAlign: 'left', border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', background: '#fff', fontSize: 14, fontWeight: 700, color: C.text }}>
+                {r.full_name}{r.family_id ? '' : ' · no family'}
+              </button>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.muted, marginBottom: 5 }}>Or type a name (won't be billed)</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input value={manual} onChange={e => setManual(e.target.value)} placeholder="Rider name" style={{ flex: 1, border: `1px solid ${C.page}`, borderRadius: 12, padding: '12px 13px', fontSize: 14, outline: 'none', fontFamily: 'inherit' }} />
+          <button onClick={() => onManual(manual)} style={{ background: C.goldTint, color: C.navy, border: 'none', borderRadius: 12, padding: '0 16px', fontSize: 13, fontWeight: 700 }}>Add</button>
+        </div>
+        <Button kind="ghost" onClick={onClose} style={{ marginTop: 14 }}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 

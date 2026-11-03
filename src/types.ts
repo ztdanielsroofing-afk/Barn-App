@@ -146,7 +146,7 @@ export interface Lesson {
   fee?: number | null;
   series_id?: string | null;
   duration_min?: number | null;
-  participants?: { name: string; family_id: string | null }[] | null;
+  participants?: { name: string; family_id: string | null; horse_name?: string | null }[] | null;
   work_types?: string[] | null;
 }
 
