@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { C, serif } from '../theme';
 import { Card, SectionLabel, Pill, Button, useScrollLock, sheetPanel } from '../ui';
 import { Page } from './Header';
@@ -173,6 +173,8 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
 
   const ready = people.length > 0;
   const dowName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getDay()];
+  // Multiple riders can't be a Private lesson — auto-switch so no one is billed as private by mistake.
+  useEffect(() => { if (people.length > 1 && type === 'Private') setType('Group'); }, [people.length, type]);
 
   function addRiderById(id: string) {
     const r = riders.find(x => x.id === id);
@@ -191,9 +193,10 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
       const trainer = staff.find(s => s.id === trainerId);
       const primary = people[0];
       const uniqueHorses = [...new Set(people.map(p => p.horse_name).filter(Boolean) as string[])];
+      const effectiveType = people.length > 1 && type === 'Private' ? 'Group' : type;
       const base: any = {
         barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, participants: people,
-        horse_name: uniqueHorses.join(', ') || null, lesson_type: type, time_label: time || null,
+        horse_name: uniqueHorses.join(', ') || null, lesson_type: effectiveType, time_label: time || null,
         fee: Number(fee) || 0, trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
         status: 'booked',
       };
@@ -201,7 +204,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
         const { data: series } = await supabase.from('lesson_series').insert({
           barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, horse_name: uniqueHorses.join(', ') || null,
           trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
-          lesson_type: type, dow: day.getDay(), time_label: time || null, fee: Number(fee) || 0,
+          lesson_type: effectiveType, dow: day.getDay(), time_label: time || null, fee: Number(fee) || 0,
         }).select('id').single();
         const n = Math.min(Math.max(Number(weeks) || 12, 1), 52);
         const rows = [];
@@ -263,11 +266,15 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
         </select>
 
         <div style={lbl}>Type</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 10 }}>
-          {['Private', 'Semi-private', 'Group', 'Training'].map(t => (
-            <button key={t} onClick={() => setType(t)} style={{ border: 'none', borderRadius: 10, padding: '10px 4px', fontSize: 12.5, fontWeight: 700, background: type === t ? C.navy : '#fff', color: type === t ? '#fff' : C.muted }}>{t}</button>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: people.length > 1 ? 4 : 10 }}>
+          {['Private', 'Semi-private', 'Group', 'Training'].map(t => {
+            const disabled = people.length > 1 && t === 'Private';
+            return (
+              <button key={t} disabled={disabled} onClick={() => setType(t)} style={{ border: 'none', borderRadius: 10, padding: '10px 4px', fontSize: 12.5, fontWeight: 700, background: type === t ? C.navy : '#fff', color: type === t ? '#fff' : C.muted, opacity: disabled ? 0.4 : 1 }}>{t}</button>
+            );
+          })}
         </div>
+        {people.length > 1 && <div style={{ fontSize: 11, color: C.muted2, margin: '0 2px 10px' }}>Multiple riders → set to a group type automatically.</div>}
 
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}><div style={lbl}>Time</div><input style={inp} value={time} onChange={e => setTime(e.target.value)} placeholder="4:00 PM" /></div>
