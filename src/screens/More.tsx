@@ -30,6 +30,7 @@ export default function More({ nav, section }: { nav: Nav; section: string | nul
       marketplace: <Marketplace />,
       reports: <Reports />,
       pay: <Pay />,
+      pricing: <Pricing />,
       documents: <Documents />,
       notifications: <Notifications />,
       settings: <Settings />,
@@ -50,7 +51,7 @@ export default function More({ nav, section }: { nav: Nav; section: string | nul
         { title: 'Overview', items: [{ l: 'Admin Overview', s: 'overview' }] },
         { title: 'People', items: [{ l: 'Clients & Families', s: 'clients' }, { l: 'Riders', s: 'riders' }, { l: 'Staff & Tasks', s: 'staff' }] },
         { title: 'Scheduling', items: [{ l: 'Scheduling Requests', s: 'requests' }, { l: 'Care Schedule', s: 'care' }, { l: 'Shows & Travel', s: 'shows' }, { l: 'Barn Marketplace', s: 'marketplace' }] },
-        { title: 'Money', items: [{ l: 'Financial Reports', s: 'reports' }, { l: canViewBilling ? 'Trainer Pay' : 'My Pay', s: 'pay' }, { l: 'Documents & Contracts', s: 'documents' }] },
+        { title: 'Money', items: [{ l: 'Lesson Pricing', s: 'pricing', ownerOnly: true }, { l: 'Financial Reports', s: 'reports' }, { l: canViewBilling ? 'Trainer Pay' : 'My Pay', s: 'pay' }, { l: 'Documents & Contracts', s: 'documents' }] },
         { title: 'Account', items: [{ l: 'Notifications', s: 'notifications' }, { l: 'Barn Settings', s: 'settings', ownerOnly: true }, { l: 'Export / Backup Data', s: 'backup', ownerOnly: true }, { l: 'My Profile', s: 'profile' }] },
       ];
 
@@ -127,7 +128,7 @@ function SignOut() {
   return (
     <div>
       <div style={{ fontSize: 11.5, color: C.muted2, textAlign: 'center', marginBottom: 10 }}>
-        Signed in as {user?.email} · {role} · build 41
+        Signed in as {user?.email} · {role} · build 42
       </div>
       <Button kind="ghost" onClick={signOut} style={{ color: C.red }}>Sign out</Button>
     </div>
@@ -1087,6 +1088,58 @@ function Reports() {
 
 /* ---------------- Trainer Pay ---------------- */
 const PAY_LABEL: Record<string, string> = { per_lesson: 'per lesson', hourly: 'per hour', percent: '% of lesson fee', manual: 'manual' };
+
+/* ---------------- Lesson Pricing ---------------- */
+export const LESSON_TYPES = ['Private', 'Tiny Tot', 'Group', 'Training'];
+
+function Pricing() {
+  const { barn, refresh } = useApp();
+  const [prices, setPrices] = useState<Record<string, string>>(() => {
+    const p = (barn?.lesson_prices || {}) as Record<string, number>;
+    const init: Record<string, string> = {};
+    LESSON_TYPES.forEach(t => { init[t] = p[t] != null ? String(p[t]) : ''; });
+    return init;
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  async function save() {
+    if (!barn) return;
+    setBusy(true); setMsg('');
+    const out: Record<string, number> = {};
+    LESSON_TYPES.forEach(t => { const n = Number(prices[t]); if (n > 0) out[t] = n; });
+    const { error } = await supabase.from('barns').update({ lesson_prices: out }).eq('id', barn.id);
+    setBusy(false);
+    if (error) { setMsg(error.message); return; }
+    setMsg('Saved ✓');
+    await refresh();
+  }
+
+  const inp: React.CSSProperties = { width: 110, border: `1px solid ${C.page}`, borderRadius: 12, padding: '11px 13px', fontSize: 15, background: '#fff', outline: 'none', fontFamily: 'inherit', textAlign: 'right' };
+
+  return (
+    <>
+      <H>Lesson Pricing</H>
+      <div style={{ fontSize: 12.5, color: C.muted2, marginBottom: 14, lineHeight: 1.5 }}>
+        Set a default price per lesson type. When you create a lesson, the fee fills in from here automatically — you can still change it on any individual lesson. Leave blank for no default.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {LESSON_TYPES.map(t => (
+          <Card key={t} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{t}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 15, color: C.muted2 }}>$</span>
+              <input style={inp} inputMode="decimal" placeholder="—" value={prices[t]}
+                onChange={e => setPrices({ ...prices, [t]: e.target.value })} />
+            </div>
+          </Card>
+        ))}
+      </div>
+      <Button onClick={save} disabled={busy} style={{ marginTop: 16 }}>{busy ? 'Saving…' : 'Save pricing'}</Button>
+      {msg && <div style={{ fontSize: 12.5, color: msg === 'Saved ✓' ? C.green : C.red, marginTop: 10, fontWeight: 600 }}>{msg}</div>}
+    </>
+  );
+}
 
 function payFor(t: AppUser, ls: Lesson[]) {
   const count = ls.length;

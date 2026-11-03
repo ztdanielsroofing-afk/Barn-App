@@ -166,6 +166,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   const [type, setType] = useState('Private');
   const [time, setTime] = useState('4:00 PM');
   const [fee, setFee] = useState('');
+  const [feeTouched, setFeeTouched] = useState(false);
   const [repeat, setRepeat] = useState(false);
   const [weeks, setWeeks] = useState('12');
   const [busy, setBusy] = useState(false);
@@ -175,6 +176,12 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   const dowName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getDay()];
   // Multiple riders can't be a Private lesson — auto-switch so no one is billed as private by mistake.
   useEffect(() => { if (people.length > 1 && type === 'Private') setType('Group'); }, [people.length, type]);
+  // Auto-fill the fee from the barn's default price for the selected type, until the user edits it.
+  useEffect(() => {
+    if (feeTouched) return;
+    const def = (barn?.lesson_prices || {})[type];
+    setFee(def != null ? String(def) : '');
+  }, [type, feeTouched, barn]);
 
   function addRiderById(id: string) {
     const r = riders.find(x => x.id === id);
@@ -278,7 +285,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
 
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}><div style={lbl}>Time</div><input style={inp} value={time} onChange={e => setTime(e.target.value)} placeholder="4:00 PM" /></div>
-          <div style={{ flex: 1 }}><div style={lbl}>Fee ($)</div><input style={inp} value={fee} onChange={e => setFee(e.target.value)} placeholder="0" inputMode="decimal" /></div>
+          <div style={{ flex: 1 }}><div style={lbl}>Fee ($)</div><input style={inp} value={fee} onChange={e => { setFee(e.target.value); setFeeTouched(true); }} placeholder="0" inputMode="decimal" /></div>
         </div>
 
         <label style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '4px 2px 10px', cursor: 'pointer' }}>

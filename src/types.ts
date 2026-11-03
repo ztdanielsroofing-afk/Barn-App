@@ -15,6 +15,7 @@ export interface Barn {
   arena_close?: string | null;
   arena_days?: Record<string, boolean> | null;
   arena_slot_min?: number | null;
+  lesson_prices?: Record<string, number> | null;
   created_at?: string;
 }
 
