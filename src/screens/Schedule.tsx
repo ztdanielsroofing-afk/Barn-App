@@ -160,9 +160,8 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
   const { data: horses } = useTable<Horse>('horses', q => q.order('name'));
   const { data: staff } = useTable<AppUser>('users', q => q.neq('role', 'client').order('full_name'));
 
-  const [people, setPeople] = useState<{ name: string; family_id: string | null }[]>([]);
+  const [people, setPeople] = useState<{ name: string; family_id: string | null; horse_name: string | null }[]>([]);
   const [manual, setManual] = useState('');
-  const [horse, setHorse] = useState('');
   const [trainerId, setTrainerId] = useState('');
   const [type, setType] = useState('Private');
   const [time, setTime] = useState('4:00 PM');
@@ -177,28 +176,30 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
 
   function addRiderById(id: string) {
     const r = riders.find(x => x.id === id);
-    if (r && !people.some(p => p.name === r.full_name)) setPeople([...people, { name: r.full_name, family_id: r.family_id }]);
+    if (r && !people.some(p => p.name === r.full_name)) setPeople([...people, { name: r.full_name, family_id: r.family_id, horse_name: null }]);
   }
   function addManual() {
     const n = manual.trim();
-    if (n && !people.some(p => p.name === n)) { setPeople([...people, { name: n, family_id: null }]); setManual(''); }
+    if (n && !people.some(p => p.name === n)) { setPeople([...people, { name: n, family_id: null, horse_name: null }]); setManual(''); }
   }
   function removePerson(i: number) { setPeople(people.filter((_, j) => j !== i)); }
+  function setRiderHorse(i: number, name: string) { setPeople(people.map((p, j) => j === i ? { ...p, horse_name: name || null } : p)); }
 
   async function save() {
     setBusy(true);
     try {
       const trainer = staff.find(s => s.id === trainerId);
       const primary = people[0];
+      const uniqueHorses = [...new Set(people.map(p => p.horse_name).filter(Boolean) as string[])];
       const base: any = {
         barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, participants: people,
-        horse_name: horse || null, lesson_type: type, time_label: time || null,
+        horse_name: uniqueHorses.join(', ') || null, lesson_type: type, time_label: time || null,
         fee: Number(fee) || 0, trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
         status: 'booked',
       };
       if (repeat) {
         const { data: series } = await supabase.from('lesson_series').insert({
-          barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, horse_name: horse || null,
+          barn_id: barn?.id, rider_name: primary.name, family_id: primary.family_id, horse_name: uniqueHorses.join(', ') || null,
           trainer_id: trainerId || null, trainer_name: trainer?.full_name || null,
           lesson_type: type, dow: day.getDay(), time_label: time || null, fee: Number(fee) || 0,
         }).select('id').single();
@@ -238,21 +239,22 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
           <button onClick={addManual} style={{ background: C.goldTint, color: C.navy, border: 'none', borderRadius: 12, padding: '0 16px', fontSize: 13, fontWeight: 700, flex: 'none' }}>Add</button>
         </div>
         {people.length > 0 && (
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
             {people.map((p, i) => (
-              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.navy, color: '#fff', borderRadius: 20, padding: '6px 10px', fontSize: 12.5, fontWeight: 700 }}>
-                {p.name}
-                <button onClick={() => removePerson(i)} style={{ background: 'rgba(255,255,255,0.25)', color: '#fff', border: 'none', borderRadius: 20, width: 18, height: 18, fontSize: 12, lineHeight: 1 }}>×</button>
-              </span>
+              <div key={i} style={{ background: '#fff', borderRadius: 12, padding: '10px 11px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 7 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>{p.name}</span>
+                  <button onClick={() => removePerson(i)} style={{ background: C.redBg, color: C.red, border: 'none', borderRadius: 8, padding: '4px 9px', fontSize: 11, fontWeight: 700 }}>Remove</button>
+                </div>
+                <select value={p.horse_name || ''} onChange={e => setRiderHorse(i, e.target.value)} style={{ ...inp, marginBottom: 0 }}>
+                  <option value="">Horse: (decide later)</option>
+                  {horses.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                </select>
+              </div>
             ))}
+            {people.length > 1 && <div style={{ fontSize: 11, color: C.muted2, padding: '0 2px' }}>Each rider can be on a different horse.</div>}
           </div>
         )}
-
-        <div style={lbl}>Horse</div>
-        <select value={horse} onChange={e => setHorse(e.target.value)} style={inp}>
-          <option value="">(none / decide later)</option>
-          {horses.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-        </select>
 
         <div style={lbl}>Trainer</div>
         <select value={trainerId} onChange={e => setTrainerId(e.target.value)} style={inp}>
