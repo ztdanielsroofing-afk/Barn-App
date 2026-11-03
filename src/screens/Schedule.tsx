@@ -12,7 +12,7 @@ import { Nav } from '../App';
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
-const lessonColor = (t: string) => ({ Private: C.navy, 'Semi-private': C.purple, Group: C.green, Training: C.gold } as any)[t] || C.navy;
+const lessonColor = (t: string) => ({ Private: C.navy, 'Tiny Tot': C.purple, 'Semi-private': C.purple, Group: C.green, Training: C.gold } as any)[t] || C.navy;
 const riderNames = (l: Lesson): string[] =>
   (l.participants && l.participants.length ? l.participants.map(p => p.name) : (l.rider_name ? [l.rider_name] : []));
 const riderTitle = (l: Lesson): string => {
@@ -267,7 +267,7 @@ function AddLessonSheet({ day, onClose, onSaved }: { day: Date; onClose: () => v
 
         <div style={lbl}>Type</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: people.length > 1 ? 4 : 10 }}>
-          {['Private', 'Semi-private', 'Group', 'Training'].map(t => {
+          {['Private', 'Tiny Tot', 'Group', 'Training'].map(t => {
             const disabled = people.length > 1 && t === 'Private';
             return (
               <button key={t} disabled={disabled} onClick={() => setType(t)} style={{ border: 'none', borderRadius: 10, padding: '10px 4px', fontSize: 12.5, fontWeight: 700, background: type === t ? C.navy : '#fff', color: type === t ? '#fff' : C.muted, opacity: disabled ? 0.4 : 1 }}>{t}</button>
